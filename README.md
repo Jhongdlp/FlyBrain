@@ -12,8 +12,12 @@ inyecta como estimulación en neuronas sensoriales. La actividad de las neuronas
 descendentes se lee como acciones: moverse, esquivar, atacar. Entre esas dos
 cosas no hay política escrita a mano — hay una mosca.
 
-> **Estado: paso 0.** El motor está terminado y probado. El conectoma todavía no
-> está conectado. Este repo es el sustrato sobre el que se va a montar.
+> **Estado: fase 1 pasada, todavía sin conectar al juego.** El motor está
+> terminado y probado. La simulación del conectoma corre y reproduce el reflejo
+> de escape: estimular las neuronas de looming (LC4, LPLC2) hace disparar a la
+> fibra gigante (DNp01) unas 30 veces más que estimular el mismo número de
+> neuronas visuales al azar, con una meseta de 7x en el parámetro libre.
+> Detalles en [`fly/README.md`](fly/README.md).
 
 ## Por qué existe
 
@@ -37,7 +41,9 @@ engine/   Rust. Toda la simulación: física, colisiones, raycasts, daño,
             └── pyo3     → Python la corre a volumen como entorno vectorizado
 web/      Three.js. Capa de presentación y nada más. Nunca le devuelve nada
           al motor.
-training/ Python. Acá va el conectoma. Hoy solo hay una prueba de humo.
+fly/      Python. La mosca: el conectoma como matriz dispersa, el simulador
+          LIF y el experimento que lo valida contra biología conocida.
+training/ Python. Prueba de humo y benchmark del entorno vectorizado.
 ```
 
 **El motor no decide la acción del boss: la recibe.** Ése es el único punto de
