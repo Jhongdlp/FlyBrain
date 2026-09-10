@@ -7,3 +7,6 @@ __pycache__/
 
 # Capturas del chequeo visual
 pantalla*.png
+
+# El conectoma: 540 MB, público, se baja con fly/paso0.py --descargar
+data/
