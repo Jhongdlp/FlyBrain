@@ -25,13 +25,17 @@ use crate::types::*;
 use crate::{arena, step};
 
 /// 16 rayos + 2 de línea de visión + 10 del jugador + (4 + N_TOOLS) del boss +
-/// 5 globales. Nunca píxeles: multiplican por mil el costo de muestras.
+/// 6 globales. Nunca píxeles: multiplican por mil el costo de muestras.
 ///
 /// El bloque del boss se escribe en función de `N_TOOLS` y no con índices a
 /// mano: la quinta herramienta pisó el hueco de `fase` cuando eran fijos.
 /// vida + un cooldown por herramienta + fase, ticks restantes y borde.
 const OBS_BOSS: usize = 4 + N_TOOLS;
-pub const OBS_DIM: usize = N_RAYS + 2 + 10 + OBS_BOSS + 5;
+pub const OBS_DIM: usize = N_RAYS + 2 + 10 + OBS_BOSS + 6;
+
+/// Con qué se divide la señal de looming para que caiga en [0,1] casi siempre.
+/// El cañón del jugador a punto de impactar da ~2 rad/s.
+pub const LOOMING_REF: f32 = 3.0;
 
 /// Tope de una pelea de entrenamiento.
 pub const EPISODE_TICKS: u32 = 3600;
@@ -127,6 +131,9 @@ impl Env {
         g[0] = w.tick as f32 / EPISODE_TICKS as f32;
         g[1] = self.momentum;
         g[2..5].copy_from_slice(&self.ultimas);
+        // La entrada sensorial de la mosca: cuánto crece en el campo visual lo
+        // que se le viene encima. Es lo que responden LC4 y LPLC2.
+        g[5] = (crate::vision::looming(w) / LOOMING_REF).min(1.0);
     }
 
     fn step(&mut self, a: &[u8]) -> (f32, bool) {
@@ -210,6 +217,26 @@ impl VecEnv {
         OBS_DIM
     }
 
+    /// Estado crudo: `(n, 9)` con `[px, py, pvx, pvy, bx, by, php, bhp, loom_proy]`.
+    ///
+    /// **Solo lectura, y no es la observación del cerebro.** Existe para guionar
+    /// al oponente en un experimento y para medir resultados; la política del
+    /// boss ve `obs`, que es egocéntrica y normalizada. Si una decisión del boss
+    /// dependiera de esto, sería una regla de juego viviendo en Python.
+    fn world_state<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f32>> {
+        let a = PyArray2::<f32>::zeros(py, [self.envs.len(), 9], false);
+        let s = unsafe { a.as_slice_mut().unwrap() };
+        for (e, o) in self.envs.iter().zip(s.chunks_mut(9)) {
+            let w = &e.w;
+            o.copy_from_slice(&[
+                w.player.pos.x, w.player.pos.y, w.player.vel.x, w.player.vel.y,
+                w.boss.pos.x, w.boss.pos.y, w.player.hp as f32, w.boss.hp as f32,
+                crate::vision::de_proyectiles(w),
+            ]);
+        }
+        a
+    }
+
     fn reset<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyArray2<f32>> {
         let obs = &mut self.obs;
         self.envs
@@ -284,5 +311,7 @@ fn engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("OBS_DIM", OBS_DIM)?;
     m.add("EPISODE_TICKS", EPISODE_TICKS)?;
     m.add("N_TOOLS", N_TOOLS)?;
+    m.add("IDX_LOOMING", OBS_DIM - 1)?;
+    m.add("IDX_LOS", N_RAYS)?;
     Ok(())
 }

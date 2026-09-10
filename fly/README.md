@@ -7,6 +7,7 @@ mosca sola, y tiene que poder validarse sola.
 paso0.py       comprueba que la fase 1 es construible (datos, aristas, E/I, circuito)
 red.py         el conectoma como matriz dispersa + el simulador LIF
 sobresalto.py  el experimento: ¿la fibra gigante responde al looming?
+piloto.py      la mosca maneja la esquiva del boss dentro del juego
 ```
 
 ```bash
@@ -79,10 +80,67 @@ Nada de eso invalida el resultado: el circuito de escape está en el conectoma,
 transmite, y responde de forma específica. Es exactamente lo que la fase 1 tenía
 que averiguar.
 
-## Lo siguiente
+## La mosca en el juego: DNp01 → esquiva
 
-DNp01 disparando **es** la esquiva del boss. Es la primera acción del juego
-mapeada a biología real en vez de asignada a dedo. Lo que falta para conectarla:
-convertir la geometría del combate en un patrón de estimulación (un objeto que se
-acerca en el mundo 2D → qué LC4 y qué LPLC2, por azimut) y leer DNp01 como el
-disparo de `ToolId::Dash`.
+```
+algo se acerca → vision::looming → LC4 + LPLC2 → DNp01 → ToolId::Dash
+```
+
+El motor calcula la señal de looming (`engine/src/vision.rs`): la tasa de
+expansión angular `2rv/d²` de lo que se le viene encima al boss, que es lo que
+responden LC4 y LPLC2. Es geometría y vive en Rust, igual que los raycasts. La
+mosca recibe ese número como corriente, corre 16,67 ms de LIF por tick de juego,
+y si la fibra gigante dispara, el boss esquiva.
+
+**La mosca decide *si* esquivar; hacia dónde es geometría** (de costado a la
+línea de tiro). La fibra gigante no es direccional, y fingir que lo es sería
+inventar biología.
+
+Escenario: boss quieto, jugador guionado que cruza el hueco del muro central y
+le dispara el cañón. Control: **las mismas esquivas en ticks al azar.**
+
+```
+=== lazo abierto: ¿dispara cuando hay un tiro? ===
+  900 ticks, 26 con proyectil encima (2.9%)
+  la fibra gigante disparó en 77 ticks
+  precisión 10%  ·  cobertura 31%  ·  lift 3.6x sobre el azar
+
+=== lazo cerrado: ¿esquivar así sirve? ===
+                        esquivas   daño recibido
+  boss quieto                   0       110 ± 0
+  esquiva la mosca             13         0 ± 0
+  esquiva al azar              13        60 ± 10
+```
+
+### Cómo leer esto sin engañarse
+
+- **La precisión de 10% no es un fallo, es la biología.** LC4 responde a todo lo
+  que se expande en el campo visual, y el jugador caminando hacia el boss
+  también se expande. La mosca no distingue un proyectil de un depredador que se
+  acerca — no tiene por qué. Contra proyectiles solos, dispara 3,6 veces más de
+  lo que tocaría por azar.
+- **En lazo cerrado el timing es limpio**: las 8 órdenes de esquiva de la semilla
+  0 caen con un proyectil encima, las 8. Una ráfaga de la fibra gigante entre los
+  ticks 130 y 137, justo cuando llega el primer tiro.
+- **El "0 de daño" está inflado por el oponente.** Tras esa primera esquiva el
+  boss queda fuera de la línea de tiro, y el jugador guionado apunta en 8
+  direcciones y no vuelve a acertar. Lo que el experimento demuestra es que la
+  esquiva llega **a tiempo**; el tamaño del efecto sobre el daño es propiedad de
+  un oponente tonto, no de la mosca.
+- **Las 4 semillas son una sola pelea.** El guion del jugador es determinista;
+  las semillas solo cambian el ruido de la mosca. De ahí el "± 0".
+- **La ganancia sensorial (10) se eligió barriendo** en lazo abierto: con 2,5 la
+  fibra gigante se pierde el 80% de los tiros, con 20 dispara a todo.
+
+### Lo que falta
+
+- **Un oponente que re-apunte.** Sin eso, cualquier esquiva parece mejor de lo
+  que es. El replay de peleas humanas de EPOCH sería el candidato natural.
+- **Retinotopía.** Todas las LC4 tienen campo receptivo derivable del conectoma
+  —el centroide de las columnas que las alimentan, mediana 18 por neurona— así
+  que el looming se puede inyectar por azimut en vez de a todas por igual. No
+  hace falta para el escape, que no es direccional; sí para que la mosca
+  *gire*.
+- **Velocidad.** 900 ticks de mosca tardan ~2,5 minutos en CPU con esta
+  ganancia. Para grabar peleas sueltas sobra; para generar miles, es donde entra
+  la GPU.

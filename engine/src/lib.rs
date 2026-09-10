@@ -18,6 +18,7 @@ pub mod python;
 pub mod raycast;
 pub mod rng;
 pub mod types;
+pub mod vision;
 pub mod wasm;
 pub mod weapons;
 

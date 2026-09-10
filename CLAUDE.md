@@ -6,9 +6,9 @@ intentó ya.
 
 ## Estado
 
-**Paso 0.** El motor está terminado, probado y en verde. El conectoma no está
-conectado — no hay una línea suya todavía. `training/` tiene una prueba de humo
-del entorno y nada más.
+El motor está terminado y en verde. La mosca corre en `fly/` (LIF sobre las
+164.506 neuronas del conectoma) y maneja **una** acción del boss: la esquiva,
+por la fibra gigante. Todo lo demás del boss sigue sin cerebro.
 
 ## El invariante del que cuelga todo
 
@@ -73,7 +73,7 @@ pub fn step(w: &mut World, input: PlayerInput, action: BossAction) -> StepEvents
 Hoy no la produce nadie. Las dos vías construidas:
 
 - **Python** (`engine/src/python.rs`): `VecEnv` toma `(n, 3)` uint8 y devuelve
-  `(n, 42)` float32 + recompensa + done. Es donde entra el conectoma.
+  `(n, 43)` float32 + recompensa + done. Es donde entra el conectoma.
 - **Navegador** (`engine/src/wasm.rs`): `load_log` + `step_log` reproducen una
   pelea grabada tick a tick. El log lo expande el motor, **no JavaScript**: el
   formato lo define `log.rs` y una segunda implementación en TS rompería la
@@ -114,6 +114,9 @@ Está todo en la historia de EPOCH si alguna vez hace falta.
   ya soporta N.
 - `raycast.rs` — 16 rayos por azimut y línea de visión. Es la percepción
   espacial, y mapea natural al sistema visual de la mosca.
+- `vision.rs` (nuevo) — la señal de looming, `2rv/d²`. Es la entrada de LC4 y
+  LPLC2. Geometría pura: vive en Rust por la misma razón que los raycasts, y no
+  toca `step`, así que no mueve el golden hash.
 - `python.rs` — el arnés. **El archivo más valioso del repo para este proyecto.**
 - `log.rs` — el empaquetado de acciones a dos bytes, el mismo en los tres lados.
 - `golden.rs` — la pelea guionada que sirve de fixture al test de determinismo.

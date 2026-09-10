@@ -12,11 +12,12 @@ inyecta como estimulación en neuronas sensoriales. La actividad de las neuronas
 descendentes se lee como acciones: moverse, esquivar, atacar. Entre esas dos
 cosas no hay política escrita a mano — hay una mosca.
 
-> **Estado: fase 1 pasada, todavía sin conectar al juego.** El motor está
-> terminado y probado. La simulación del conectoma corre y reproduce el reflejo
-> de escape: estimular las neuronas de looming (LC4, LPLC2) hace disparar a la
-> fibra gigante (DNp01) unas 30 veces más que estimular el mismo número de
-> neuronas visuales al azar, con una meseta de 7x en el parámetro libre.
+> **Estado: la mosca ya maneja una acción del boss.** La simulación del
+> conectoma reproduce el reflejo de escape —estimular LC4 y LPLC2 hace disparar a
+> la fibra gigante (DNp01) unas 30 veces más que estimular neuronas visuales al
+> azar— y ese reflejo ya está conectado a la esquiva del boss: cuando algo se le
+> viene encima, la fibra gigante dispara y el boss esquiva, a tiempo, contra un
+> control de esquivas al azar. Todo lo demás del boss sigue sin cerebro.
 > Detalles en [`fly/README.md`](fly/README.md).
 
 ## Por qué existe
@@ -28,7 +29,7 @@ hay forma de correr un millón de partidas para ver si algo emergió.
 
 Este motor sí fue diseñado para eso, por accidente: venía de un proyecto de RL,
 así que ya es determinista, corre headless a ~1M de pasos por segundo, expone
-una observación de 42 dimensiones y calcula recompensa densa por tick. Todo lo
+una observación de 43 dimensiones y calcula recompensa densa por tick. Todo lo
 que un cerebro necesita para pelear, y para medir si peleó bien.
 
 ## Cómo está armado
@@ -56,7 +57,7 @@ pub fn step(w: &mut World, input: PlayerInput, action: BossAction) -> StepEvents
 Quien produzca un `BossAction` por tick controla al boss. Hoy no lo produce
 nadie; mañana lo produce una mosca.
 
-### Lo que el cerebro ve — 42 dimensiones
+### Lo que el cerebro ve — 43 dimensiones
 
 Egocéntrica: todo rotado al marco del boss, para que "el jugador viene por mi
 derecha" sea siempre la misma entrada. **Nunca píxeles** — multiplican por mil
@@ -69,6 +70,7 @@ el costo de muestras.
 | 10 | jugador: posición y velocidad relativas, vida, fase de acción, i-frames |
 | 9 | boss: vida, cinco cooldowns, fase, distancia al borde |
 | 5 | global: tiempo, momentum de daño, últimas tres acciones del jugador |
+| 1 | **looming**: cuánto crece en el campo visual lo que se le viene encima (`2rv/d²`) — lo que responden LC4 y LPLC2 |
 
 ### Lo que el cerebro controla
 

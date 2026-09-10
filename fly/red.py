@@ -89,53 +89,76 @@ class Parametros:
     tau_m: float = 20.0     # membrana
     tau_s: float = 5.0      # corriente sináptica
     refractario: float = 2.0
-    escala: float = 2e-4    # sinapsis → corriente. **La perilla que se barre.**
-    ruido: float = 0.02     # actividad espontánea; sin esto la red no arranca
+    # Los dos valores medidos, no elegidos: ver el barrido en fly/README.md.
+    # `escala` es el centro de la meseta que pasa el experimento del sobresalto;
+    # `ruido` es el nivel más alto al que la red sigue **muda sin sinapsis**, así
+    # que toda la actividad que aparece es recurrente y no ruido colado.
+    escala: float = 0.03
+    ruido: float = 2.0
 
 
-def simular(red: Red, p: Parametros, ms: float, estimulo=None, semilla: int = 0):
-    """Corre la red y devuelve la matriz de disparos `(pasos, n)` como bool.
+class Simulador:
+    """La red corriendo, con estado que persiste entre llamadas.
 
-    `estimulo` es `(indices, corriente, desde_ms, hasta_ms)`, o `None`.
+    Es una clase y no una función porque el juego la consulta tick a tick: el
+    potencial de membrana y la corriente sináptica tienen que sobrevivir de un
+    tick al siguiente, o cada tick empezaría con una red recién nacida y no
+    habría dinámica ninguna.
 
     La propagación es por eventos: solo se leen las columnas de las neuronas que
     dispararon. Con ~1% de actividad son 0,7 ms por paso contra 7,9 del producto
     completo — la diferencia entre correr esto en una laptop y tener que
     alquilar una GPU.
     """
-    rng = np.random.default_rng(semilla)
-    n, pasos = red.n, int(ms / p.dt)
-    V = np.zeros(n, np.float32)
-    I = np.zeros(n, np.float32)
-    congelado = np.zeros(n, np.int32)
-    disparos = np.zeros((pasos, n), bool)
 
-    decae_I = np.float32(np.exp(-p.dt / p.tau_s))
-    decae_V = np.float32(p.dt / p.tau_m)
-    ref_pasos = int(p.refractario / p.dt)
+    def __init__(self, red: Red, p: Parametros, semilla: int = 0):
+        self.red, self.p = red, p
+        self.rng = np.random.default_rng(semilla)
+        self.V = np.zeros(red.n, np.float32)
+        self.I = np.zeros(red.n, np.float32)
+        self.congelado = np.zeros(red.n, np.int32)
+        self.ultimo = np.zeros(red.n, bool)
+        self._decae_I = np.float32(np.exp(-p.dt / p.tau_s))
+        self._decae_V = np.float32(p.dt / p.tau_m)
+        self._ref = int(p.refractario / p.dt)
 
-    idx_est, corriente, desde, hasta = estimulo or (np.array([], int), 0.0, 0, 0)
-
-    for t in range(pasos):
-        I *= decae_I
-        activas = np.flatnonzero(disparos[t - 1]) if t else np.array([], np.int32)
+    def paso(self, ext: np.ndarray | None = None) -> np.ndarray:
+        """Un paso de `p.dt` ms. `ext` es corriente externa por neurona."""
+        p, red = self.p, self.red
+        self.I *= self._decae_I
+        activas = np.flatnonzero(self.ultimo)
         if activas.size:
-            I += p.escala * np.asarray(red.W[:, activas].sum(axis=1), np.float32).ravel()
+            self.I += p.escala * np.asarray(red.W[:, activas].sum(axis=1), np.float32).ravel()
 
-        ext = rng.standard_normal(n).astype(np.float32) * p.ruido
-        if desde <= t * p.dt < hasta:
-            ext[idx_est] += corriente
+        e = self.rng.standard_normal(red.n).astype(np.float32) * p.ruido
+        if ext is not None:
+            e += ext
 
-        V += decae_V * (-V + I + ext)
-        V[congelado > 0] = 0.0
-        congelado[congelado > 0] -= 1
+        self.V += self._decae_V * (-self.V + self.I + e)
+        self.V[self.congelado > 0] = 0.0
+        self.congelado[self.congelado > 0] -= 1
 
-        s = V > 1.0
-        disparos[t] = s
-        V[s] = 0.0
-        congelado[s] = ref_pasos
+        s = self.V > 1.0
+        self.V[s] = 0.0
+        self.congelado[s] = self._ref
+        self.ultimo = s
+        return s
 
-    return disparos
+    def avanzar(self, ms: float, ext: np.ndarray | None = None) -> np.ndarray:
+        """`ms` de simulación con la misma corriente externa. Devuelve `(pasos, n)`."""
+        return np.array([self.paso(ext) for _ in range(int(ms / self.p.dt))])
+
+
+def simular(red: Red, p: Parametros, ms: float, estimulo=None, semilla: int = 0):
+    """Corre la red desde cero. `estimulo` es `(indices, corriente, desde_ms, hasta_ms)`."""
+    sim = Simulador(red, p, semilla)
+    idx, corriente, desde, hasta = estimulo or (np.array([], int), 0.0, 0.0, 0.0)
+    ext = np.zeros(red.n, np.float32)
+    ext[idx] = corriente
+    cero = np.zeros(red.n, np.float32)
+    pasos = int(ms / p.dt)
+    return np.array([sim.paso(ext if desde <= t * p.dt < hasta else cero)
+                     for t in range(pasos)])
 
 
 def hz(disparos: np.ndarray, idx: np.ndarray, p: Parametros) -> float:
