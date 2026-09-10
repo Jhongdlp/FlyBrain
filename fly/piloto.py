@@ -9,14 +9,20 @@ En la mosca DNp01 dispara un salto de escape estereotipado; acá dispara
 `ToolId::Dash`. **La mosca decide *si* esquivar; hacia dónde es geometría** — la
 fibra gigante no es direccional, y fingir que lo es sería inventar biología.
 
-El escenario: boss quieto, jugador acercándose y disparándole el cañón. El
-cañón vuela 18 ticks y el boss necesita 16 para salir del corredor (ver
-`weapons`), así que el margen está pensado para que esquivar sea una decisión.
+El escenario: boss quieto, y el oponente de `oponente.py` rodeando la
+cobertura para dispararle el cañón. El cañón vuela 18 ticks y el boss necesita
+16 para salir del corredor (ver `weapons`), así que el margen está pensado para
+que esquivar sea una decisión.
+
+El oponente importa tanto como la mosca. El anterior caminaba en línea recta y
+se clavaba contra la primera caja que lo dejara sin visión, así que cualquier
+esquiva que pusiera al boss detrás de una parecía salvadora.
 
 El control es lo que le da sentido: **el mismo número de esquivas, en ticks al
 azar.** Si la mosca no le gana a eso, no está aportando timing, solo esquivas.
 
-    python fly/piloto.py
+    python fly/piloto.py              # el experimento, con su control
+    python fly/piloto.py --grabar     # una pelea de la mosca para verla en el navegador
 """
 
 import sys
@@ -27,6 +33,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import engine  # noqa: E402
 import red as R  # noqa: E402
+from oponente import Oponente  # noqa: E402
 
 TAU = 2 * np.pi
 
@@ -52,33 +59,6 @@ PELIGRO = 0.05
 IDLE = 0
 DASH = (2 << 6) | (4 << 3)  # Use(ToolId::Dash, param)
 
-
-def boton_jugador(dir8: int, dispara: bool) -> int:
-    return ((4 if dispara else 0) << 4) | 0x08 | (dir8 & 0x07)
-
-
-# El hueco entre los dos tramos del muro central de `arenas/launch.json`, que
-# van de y=4 a 12 y de y=15 a 20. **Específico de esta arena**, a propósito: el
-# jugador de este experimento es una utilería, no un agente, y darle pathfinding
-# sería construir la fase 3 para medir la fase 1.
-PASO = (17.0, 13.5)
-
-
-def jugador(w, obs) -> int:
-    """El oponente guionado: cruza el hueco, se acerca y dispara el cañón.
-
-    Los dos spawns están en y=10 y el muro central los separa, o sea que la
-    línea de visión arranca **bloqueada**. Sin cruzar, el jugador le dispara a
-    la pared y el experimento mide cero — que es exactamente lo que pasó las dos
-    primeras veces que corrí esto.
-    """
-    px, py, bx, by = w[0], w[1], w[4], w[5]
-    libre = obs[engine.IDX_LOS] > 0.5
-    objetivo = (bx, by) if (libre or px > PASO[0]) else PASO
-    ang = np.arctan2(objetivo[1] - py, objetivo[0] - px)
-    dir8 = int(round(ang / TAU * 8)) % 8
-    cerca = np.hypot(bx - px, by - py) < 14.0
-    return boton_jugador(dir8, libre and cerca)
 
 
 def de_costado(w) -> int:
@@ -113,6 +93,9 @@ class Piloto:
 def corrida(politica, semilla=1):
     """Una pelea. `politica(t, looming, w) -> (byte, param)` decide al boss."""
     env = engine.VecEnv(1, seed=semilla)
+    # Una semilla distinta es un oponente con otro carácter —otra distancia de
+    # tiro preferida— y por lo tanto otra pelea, no la misma con otro ruido.
+    oponente = Oponente(semilla)
     obs = env.reset()
     looms, proyectil, esquivas = [], [], []
 
@@ -124,13 +107,16 @@ def corrida(politica, semilla=1):
         proyectil.append(float(w[8]))
         esquivas.append(byte == DASH)
 
-        a = np.array([[jugador(w, obs[0]), byte, param]], np.uint8)
+        a = np.array([[oponente(w, obs[0]), byte, param]], np.uint8)
 
         obs, _, done = env.step(a)
         if done[0]:
             break
 
     return {
+        # El log sale antes de que el entorno se reinicie: `fight_log` es el
+        # episodio en curso, y el reinicio automático lo borraría.
+        "log": env.fight_log(0),
         "hp": float(env.world_state()[0][7]),
         "looming": np.array(looms),
         "proyectil": np.array(proyectil),
@@ -209,5 +195,26 @@ def main():
         print("\n  NO: los disparos de la fibra gigante no siguen a la amenaza.")
 
 
+def grabar(nombre="mosca"):
+    """Juega una pelea con la mosca y la deja en `web/public/<nombre>.bin`."""
+    red = R.construir()
+    pil = Piloto(red)
+    r = corrida(lambda t, l, w: (DASH, de_costado(w)) if pil.tick(l) else (IDLE, 0))
+
+    # La comprobación que hace honesta a la grabación: el mismo motor re-simula
+    # el log desde cero y tiene que llegar al mismo final. Si no, lo que se ve en
+    # el navegador sería otra pelea.
+    _, boss_hp, ticks = engine.reproducir(r["log"])
+    assert boss_hp == r["hp"], f"la reproducción diverge: {boss_hp} contra {r['hp']}"
+
+    destino = Path(__file__).resolve().parent.parent / "web" / "public" / f"{nombre}.bin"
+    destino.parent.mkdir(exist_ok=True)
+    destino.write_bytes(r["log"])
+    print(f"{ticks} ticks · {int(r['esquivas'].sum())} esquivas · "
+          f"daño al boss {1000 - r['hp']:.0f} · {len(r['log'])} bytes")
+    print(f"reproducción verificada → {destino.relative_to(destino.parents[2])}")
+    print(f"\n  ./scripts/dev.sh   y abrí   http://localhost:5173/?pelea={nombre}")
+
+
 if __name__ == "__main__":
-    main()
+    grabar() if "--grabar" in sys.argv else main()

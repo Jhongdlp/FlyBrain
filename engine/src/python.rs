@@ -15,6 +15,7 @@
 use numpy::{PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use rayon::prelude::*;
 
 use crate::actor;
@@ -64,13 +65,27 @@ struct Env {
     /// Últimas tres acciones del jugador. En 60 segundos es toda la memoria que
     /// importa: no hacen falta ni LSTM ni transformers.
     ultimas: [f32; 3],
+    /// La pelea en curso, grabada como la graba el navegador: semilla del mundo
+    /// y solo los cambios de entrada. Es lo que permite ver en el navegador una
+    /// pelea que jugó la mosca en Python — el mismo motor la re-simula bit a bit.
+    seed: u64,
+    records: Vec<log::Record>,
+    ultimo: Option<(PlayerInput, BossAction)>,
 }
 
 impl Env {
     fn new(seed: u64) -> Self {
         let mut rng = Rng::new(seed);
-        let w = World::new(arena::launch(), rng.next_u32() as u64 | (rng.next_u32() as u64) << 32);
-        Env { w, rng, momentum: 0.0, ultimas: [0.0; 3] }
+        let s = rng.next_u32() as u64 | (rng.next_u32() as u64) << 32;
+        Env {
+            w: World::new(arena::launch(), s),
+            rng,
+            momentum: 0.0,
+            ultimas: [0.0; 3],
+            seed: s,
+            records: Vec::new(),
+            ultimo: None,
+        }
     }
 
     fn reset(&mut self) {
@@ -78,6 +93,9 @@ impl Env {
         self.w = World::new(arena::launch(), seed);
         self.momentum = 0.0;
         self.ultimas = [0.0; 3];
+        self.seed = seed;
+        self.records.clear();
+        self.ultimo = None;
     }
 
     /// Egocéntrica: todo lo del jugador va rotado al marco del boss. Así "el
@@ -139,6 +157,13 @@ impl Env {
     fn step(&mut self, a: &[u8]) -> (f32, bool) {
         let input = log::decode_player(a[0]).unwrap_or_default();
         let action = log::decode_boss(a[1], a[2]).unwrap_or(BossAction::Idle);
+
+        // Antes de avanzar: el record lleva el tick en que la entrada pasa a
+        // valer, igual que `wasm::step_auto`.
+        if self.ultimo != Some((input, action)) {
+            self.records.push(log::Record { tick: self.w.tick, input, action });
+            self.ultimo = Some((input, action));
+        }
 
         let hp_antes = (self.w.player.hp, self.w.boss.hp);
         let ev = step(&mut self.w, input, action);
@@ -215,6 +240,26 @@ impl VecEnv {
     #[getter]
     fn obs_dim(&self) -> usize {
         OBS_DIM
+    }
+
+    /// El log de la pelea en curso del entorno `i`, listo para el navegador
+    /// (`web/public/<nombre>.bin`, `?pelea=<nombre>`).
+    ///
+    /// **Es el episodio en curso**: el reinicio automático al terminar lo borra.
+    /// Pedilo antes de que el entorno llegue a `done`.
+    fn fight_log<'py>(&self, py: Python<'py>, i: usize) -> PyResult<Bound<'py, PyBytes>> {
+        let e = self.envs.get(i).ok_or_else(|| PyValueError::new_err("entorno fuera de rango"))?;
+        let l = log::FightLog {
+            version: log::FORMAT_VERSION,
+            world_seed: e.seed,
+            arena_id: e.w.arena.id,
+            arena_seed: e.w.arena.seed,
+            brain_version: 0,
+            player_id: 0,
+            ticks: e.w.tick,
+            records: e.records.clone(),
+        };
+        Ok(PyBytes::new(py, &log::encode(&l)))
     }
 
     /// Estado crudo: `(n, 9)` con `[px, py, pvx, pvy, bx, by, php, bhp, loom_proy]`.
@@ -305,9 +350,20 @@ impl VecEnv {
     }
 }
 
+/// Re-simula un log desde cero y devuelve `(vida del jugador, vida del boss,
+/// ticks)`. Es la comprobación de que lo que se grabó en Python es lo que va a
+/// ver el navegador: el mismo motor, la misma pelea.
+#[pyfunction]
+fn reproducir(datos: &[u8]) -> PyResult<(i32, i32, u32)> {
+    let l = log::decode(datos).map_err(|e| PyValueError::new_err(format!("{e:?}")))?;
+    let w = crate::golden::simulate(&l);
+    Ok((w.player.hp, w.boss.hp, w.tick))
+}
+
 #[pymodule]
 fn engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VecEnv>()?;
+    m.add_function(wrap_pyfunction!(reproducir, m)?)?;
     m.add("OBS_DIM", OBS_DIM)?;
     m.add("EPISODE_TICKS", EPISODE_TICKS)?;
     m.add("N_TOOLS", N_TOOLS)?;

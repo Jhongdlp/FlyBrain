@@ -4,4 +4,4 @@ dist/
 public/engine.wasm
 pantalla*.png
 crop*.png
-public/fight_0.bin
+public/*.bin

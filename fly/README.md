@@ -8,11 +8,15 @@ paso0.py       comprueba que la fase 1 es construible (datos, aristas, E/I, circ
 red.py         el conectoma como matriz dispersa + el simulador LIF
 sobresalto.py  el experimento: ¿la fibra gigante responde al looming?
 piloto.py      la mosca maneja la esquiva del boss dentro del juego
+oponente.py    el jugador guionado: rodea la cobertura, recupera el tiro y dispara
 ```
 
 ```bash
 python fly/paso0.py --descargar    # 540 MB, bucket público, una sola vez
 python fly/sobresalto.py           # ~2 min en CPU
+python fly/piloto.py               # ~12 min: la mosca contra su control
+python fly/piloto.py --grabar      # ~3 min: una pelea para verla en el navegador
+./scripts/dev.sh                   # y abrir http://localhost:5173/?pelea=mosca
 ```
 
 ## El resultado
@@ -96,46 +100,72 @@ y si la fibra gigante dispara, el boss esquiva.
 línea de tiro). La fibra gigante no es direccional, y fingir que lo es sería
 inventar biología.
 
-Escenario: boss quieto, jugador guionado que cruza el hueco del muro central y
-le dispara el cañón. Control: **las mismas esquivas en ticks al azar.**
+Escenario: boss quieto, y el oponente de `oponente.py` rodeando la cobertura
+para dispararle el cañón. Control: **las mismas esquivas en ticks al azar.**
 
 ```
 === lazo abierto: ¿dispara cuando hay un tiro? ===
-  900 ticks, 26 con proyectil encima (2.9%)
-  la fibra gigante disparó en 77 ticks
-  precisión 10%  ·  cobertura 31%  ·  lift 3.6x sobre el azar
+  900 ticks, 90 con proyectil encima (10.0%)
+  la fibra gigante disparó en 40 ticks
+  precisión 88%  ·  cobertura 39%  ·  lift 8.8x sobre el azar
 
 === lazo cerrado: ¿esquivar así sirve? ===
                         esquivas   daño recibido
   boss quieto                   0       110 ± 0
-  esquiva la mosca             13         0 ± 0
-  esquiva al azar              13        60 ± 10
+  esquiva la mosca             44        44 ± 0
+  esquiva al azar              44        88 ± 0
 ```
+
+Con el mismo número de esquivas, la mosca deja pasar la mitad del daño que el
+azar. Cuando la fibra gigante dispara, 9 de cada 10 veces hay un proyectil
+encima.
+
+### El oponente importa tanto como la mosca
+
+La primera versión de este experimento daba **0 de daño contra 60**, y era
+mentira a favor de la mosca. El oponente caminaba en línea recta hacia el boss;
+la primera esquiva lo dejaba detrás de una caja, el oponente se clavaba contra
+ella sin visión, y no volvía a disparar en 750 ticks. Cualquier esquiva parecía
+salvadora.
+
+(Una explicación anterior de este README decía que el problema era que el
+oponente apuntaba en 8 direcciones y no re-apuntaba. **Era falsa**: el motor fija
+el cañón sobre el boss en cada disparo. El problema era la navegación.)
+
+`oponente.py` lo arregla con BFS sobre una grilla de la arena: busca la celda más
+cercana con tiro al boss y llega rodeando los muros. Y exige que el **tubo** del
+proyectil esté despejado, no solo el rayo de visión del motor — sin eso se paraba
+donde el rayo pasaba y le disparaba 700 ticks a la esquina de una caja (holgura
+0,23 contra un proyectil de radio 0,3).
+
+Con el oponente competente la precisión en lazo abierto sube de 10% a 88%. No es
+que la mosca haya cambiado: es que el oponente viejo caminaba hacia el boss todo
+el tiempo, y un cuerpo que se acerca también se expande en el campo visual. El
+nuevo se para a disparar, y lo que se expande pasan a ser los proyectiles.
 
 ### Cómo leer esto sin engañarse
 
-- **La precisión de 10% no es un fallo, es la biología.** LC4 responde a todo lo
-  que se expande en el campo visual, y el jugador caminando hacia el boss
-  también se expande. La mosca no distingue un proyectil de un depredador que se
-  acerca — no tiene por qué. Contra proyectiles solos, dispara 3,6 veces más de
-  lo que tocaría por azar.
-- **En lazo cerrado el timing es limpio**: las 8 órdenes de esquiva de la semilla
-  0 caen con un proyectil encima, las 8. Una ráfaga de la fibra gigante entre los
-  ticks 130 y 137, justo cuando llega el primer tiro.
-- **El "0 de daño" está inflado por el oponente.** Tras esa primera esquiva el
-  boss queda fuera de la línea de tiro, y el jugador guionado apunta en 8
-  direcciones y no vuelve a acertar. Lo que el experimento demuestra es que la
-  esquiva llega **a tiempo**; el tamaño del efecto sobre el daño es propiedad de
-  un oponente tonto, no de la mosca.
-- **Las 4 semillas son una sola pelea.** El guion del jugador es determinista;
-  las semillas solo cambian el ruido de la mosca. De ahí el "± 0".
+- **La resolución es baja.** El cañón tiene 3 s de enfriamiento, así que en 900
+  ticks el oponente dispara unas cinco veces. "44 contra 88" son 2 impactos
+  contra 4. El resultado es consistente —el mismo en las 4 semillas— pero es un
+  conteo chico. Peleas de 3600 ticks lo afinarían, a cuatro veces el costo.
+- **"± 0" en las 4 semillas no es una pelea repetida.** Cada semilla le da al
+  oponente otra distancia de tiro preferida y cambia la trayectoria; lo que no
+  cambia es el conteo de impactos, porque lo limita el enfriamiento del cañón.
+- **La mosca decide *si*; hacia dónde es geometría.** La esquiva va siempre de
+  costado a la línea de tiro.
 - **La ganancia sensorial (10) se eligió barriendo** en lazo abierto: con 2,5 la
   fibra gigante se pierde el 80% de los tiros, con 20 dispara a todo.
 
+### Verla
+
+`python fly/piloto.py --grabar` juega una pelea con la mosca y la guarda en
+`web/public/mosca.bin`. Antes de guardarla, el motor la re-simula desde cero y
+comprueba que llega al mismo final: lo que se ve en el navegador es la pelea que
+jugó la mosca, no una aproximación.
+
 ### Lo que falta
 
-- **Un oponente que re-apunte.** Sin eso, cualquier esquiva parece mejor de lo
-  que es. El replay de peleas humanas de EPOCH sería el candidato natural.
 - **Retinotopía.** Todas las LC4 tienen campo receptivo derivable del conectoma
   —el centroide de las columnas que las alimentan, mediana 18 por neurona— así
   que el looming se puede inyectar por azimut en vez de a todas por igual. No
