@@ -1,0 +1,9 @@
+target/
+node_modules/
+dist/
+__pycache__/
+.venv/
+*.so
+
+# Capturas del chequeo visual
+pantalla*.png

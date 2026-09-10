@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# Artefactos: se regeneran con scripts/build-web.sh y npm run check.
+public/engine.wasm
+pantalla*.png
+crop*.png
+public/fight_0.bin

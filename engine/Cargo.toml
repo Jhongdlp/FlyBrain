@@ -1,0 +1,29 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# cdylib para que wasm exporte `golden_hash_c` (T7) y, más adelante, el binding
+# de T9. rlib para que los tests y Python sigan enlazando normal.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# La única dependencia del motor. Las transcendentales salen de acá y no de
+# `f32`: la libm de la plataforma difiere entre wasm y x86 y rompe el replay.
+libm = "0.2"
+
+# Solo para el entorno de entrenamiento (T10). Detrás de una feature para que
+# el bundle wasm y el Worker no las carguen ni de casualidad.
+pyo3 = { version = "0.29", features = ["extension-module"], optional = true }
+numpy = { version = "0.29", optional = true }
+rayon = { version = "1.12", optional = true }
+
+[features]
+python = ["dep:pyo3", "dep:numpy", "dep:rayon"]
+# Solo para iterar la pelea: le baja la vida al boss. Nunca en producción.
+dev = []
+
+[lints.rust]
+# El motor no hace I/O ni mide el tiempo.
+unused_must_use = "deny"

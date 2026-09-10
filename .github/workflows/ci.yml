@@ -1,0 +1,34 @@
+# Los cuatro chequeos del README. El de determinismo es el que importa: si el
+# hash nativo y el de wasm dejan de coincidir, una pelea grabada en la GPU ya no
+# se reproduce igual en el navegador, y eso invalida el proyecto entero.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  motor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
+      - run: ./scripts/wasm-determinism.sh
+      - run: node scripts/wasm-smoke.mjs
+
+  entorno:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install maturin numpy
+      - run: maturin develop --release
+      - run: python training/env_smoke.py 1024

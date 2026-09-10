@@ -1,0 +1,17 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "flybrain-engine"
+version = "0.1.0"
+description = "Motor de combate como entorno vectorizado para el conectoma"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+
+[tool.maturin]
+manifest-path = "engine/Cargo.toml"
+module-name = "engine"
+# El motor se compila con `python` solo acá. El bundle wasm y el Worker no
+# cargan pyo3 ni rayon ni de casualidad.
+features = ["python"]

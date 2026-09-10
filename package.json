@@ -1,0 +1,9 @@
+{
+  "name": "flybrain",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "build": "bash scripts/build-wasm.sh && cd web && npm run build",
+    "test": "bash scripts/build-wasm.sh && cd engine && cargo test"
+  }
+}
