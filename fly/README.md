@@ -263,3 +263,52 @@ selectividad de dirección medidas en 26 estudios. Su código es `flyvis` (MIT).
 **Conclusión del intento:** el reflejo del cerebro central funciona sin
 entrenar porque es una vía corta de neuronas que disparan espigas. El lóbulo
 óptico es otra clase de computadora, y no se deja simular con el mismo modelo.
+
+## Verificación de `flyvis` como ojo (opción 2)
+
+La idea: que `flyvis` —el modelo del sistema visual de Lappalainen et al.— haga
+el ojo, y que su salida entre en nuestro conectoma, que sigue hasta LC4, LPLC2 y
+la fibra gigante.
+
+**Corre.** Solo soporta Python 3.9–3.12, así que va en su propio entorno
+(`.venv-ojo`, Python 3.11, PyTorch solo-CPU; ojo que `pip install flyvis` trae
+un `torchvision` que no casa con el torch de CPU y hay que alinearlo desde el
+mismo índice). Pico de 1,4 GB de memoria, ~5 veces más lento que tiempo real a
+pasos de 10 ms: sirve para grabar, no para jugar en vivo.
+
+**Qué es:** 65 tipos celulares, 45.669 neuronas, retina hexagonal de 721
+columnas, de los fotorreceptores hasta T4/T5. **Solo 734 parámetros entrenados**
+(más 2.959 fijos): no se entrenaron sinapsis una por una sino unos pocos
+números por tipo celular, y la conectividad es la del conectoma. La frase honesta
+con este ojo: *ojos con un modelo entrenado del sistema visual real; del lóbulo
+al escape, el cableado sin entrenar.*
+
+**Selectividad de dirección: sí.** Bordes oscuros barriendo en cuatro
+direcciones: T5a, b, c y d prefieren cuatro direcciones distintas, dos
+horizontales opuestas y dos verticales opuestas, con hasta 4,4x de selectividad.
+
+**Firma de looming en T4/T5: no concluyente.** Un índice radial (¿el movimiento
+detectado va del centro hacia afuera?) da +0,38 al looming y −0,13 al que se
+aleja en el modelo 000, pero en los modelos 001 y 002 un disco que solo se
+desplaza da más que el looming. La primera versión de este test además tenía un
+control mal hecho (el disco aparecía de golpe y pasaba más tiempo de un lado),
+que inflaba justo lo que había que descartar. No es que `flyvis` falle: en la
+mosca, la selectividad al looming la calcula LPLC2 con dendritas radiales e
+inhibición lateral, y ese cableado está en MaleCNS, no en `flyvis`. Un índice
+que suma movimiento es una medida demasiado cruda.
+
+**Encaje con MaleCNS: estructuralmente sí.** 49 de los 65 tipos existen con el
+mismo nombre (los demás son sobre todo diferencias de nomenclatura de
+fotorreceptores). LPLC2 recibe el 55% de su entrada de tipos que `flyvis`
+simula (T5a-d, T4c, Tm5Y, Tm20); LC4, el 60% (TmY3, T2, Tm4, Tm2, Tm3).
+
+**Lo que falta para la prueba de verdad** —meter la salida de `flyvis` en las
+LPLC2 de MaleCNS y ver si ellas y la fibra gigante distinguen el looming:
+
+1. Emparejar columnas: las T4/T5/Tm de MaleCNS no traen columna; se derivan de
+   sus entradas (Mi1 la tiene al 99%), igual que los fotorreceptores.
+2. Alinear las dos grillas: se puede anclar con las propias etiquetas de
+   dirección (T5a, b, c, d), que tienen el mismo significado en los dos modelos.
+3. Acoplar: voltaje graduado de `flyvis` → corriente en la neurona homóloga del
+   LIF, con una ganancia.
+4. El experimento con los controles justos, como el del sobresalto.
