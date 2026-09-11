@@ -8,7 +8,9 @@ paso0.py       comprueba que la fase 1 es construible (datos, aristas, E/I, circ
 red.py         el conectoma como matriz dispersa + el simulador LIF
 sobresalto.py  el experimento: ¿la fibra gigante responde al looming?
 piloto.py      la mosca maneja la esquiva del boss dentro del juego
-ojo.py         la retina: a dónde mira cada fotorreceptor
+ojo.py         la retina: a dónde mira cada fotorreceptor; columnas derivadas
+ojo_flyvis.py  el ojo de flyvis mira los estímulos (corre en .venv-ojo)
+acople.py      la salida de flyvis entra en MaleCNS y se mide LPLC2/LC4/DNp01
 oponente.py    el jugador guionado: rodea la cobertura, recupera el tiro y dispara
 ```
 
@@ -312,3 +314,102 @@ LPLC2 de MaleCNS y ver si ellas y la fibra gigante distinguen el looming:
 3. Acoplar: voltaje graduado de `flyvis` → corriente en la neurona homóloga del
    LIF, con una ganancia.
 4. El experimento con los controles justos, como el del sobresalto.
+
+## Ojos con `flyvis` + conectoma: el primer experimento
+
+**Cómo se enchufan.** `flyvis` simula 49 tipos celulares del ojo derecho con
+equivalente en MaleCNS; su respuesta sobre el reposo entra como corriente en las
+neuronas homólogas (mismo tipo, misma columna): **21.976 neuronas**, que quedan
+fijadas a lo que dice el ojo. De ahí en adelante manda el cableado de MaleCNS.
+Cada pieza se validó sola antes de juntarlas:
+
+- **Columnas.** Las T4/T5 de MaleCNS no traen columna; se derivan de sus
+  vecinos sinápticos. Escondiendo la anotación de Mi1, Tm1 y Tm9, la derivación
+  acierta la columna en el 98-100% (error mediano 0,07 columnas).
+- **Orientación.** Las entradas T4/T5 de las 84 LPLC2 del ojo derecho forman una
+  cruz: cada dirección de movimiento, desplazada hacia su lado (arriba y abajo
+  opuestas a 178°, perpendiculares a adelante/atrás). Es el cableado radial del
+  detector de looming (Klapoetke et al., 2017), recuperado solo con columnas
+  derivadas, y ancla qué es arriba y qué es atrás. El mapa ajustado con dos
+  direcciones predice la tercera con 2° de error; es casi una rotación pura.
+
+**Resultado del primer intento: no pasa, pero el ojo funciona.** Con la tasa
+promediada sobre 900 ms ningún grupo separaba el looming de los controles, y la
+fibra gigante disparaba con cualquier cosa menos con el looming. Mirando la
+respuesta en el tiempo (ganancia 6):
+
+| ms | 200-500 | 500-800 | 800-950 | 950-1100 (choque) |
+|---|---|---|---|---|
+| LPLC2 | 0,4 | 0,5 | 6,2 | 10,8 |
+| LC4 | 0,1 | 0,7 | 8,2 | 43,0 |
+| DNp01 | 1,7 | 0 | 0 | 0 |
+
+LPLC2 y LC4 hacen exactamente lo que hacen en la mosca: callados mientras el
+objeto está lejos y cada vez más fuertes a medida que se acerca. El promedio lo
+escondía, porque todo pasa en los últimos 250 ms.
+
+**Por qué la fibra gigante no responde: inhibición.** Durante el looming le
+llegan 72.704 de excitación (de LC4 y LPLC2) y 351.445 de inhibición, desde
+GNG300, SAD073, LHAD1g1, IN12B015 y CL367 — GABAérgicas, con confianza 0,81-0,89
+en la predicción de neurotransmisor. No es un error de la regla "glutamato
+inhibe": esa inhibición existe en el cableado real. Al final del looming el
+campo visual entero se oscurece, eso excita a medio cerebro central, y las vías
+inhibidoras que convergen sobre la fibra gigante le ganan a LC4. Es la lección de
+la fase 1 otra vez, ahora a la salida: en la fase 1 solo se estimulaban 311
+neuronas y el resto del cerebro no se enteraba; con ojos de verdad se entera
+todo, y los parámetros calibrados entonces no alcanzan. **Lo que falta no es la
+inhibición sino su fuerza y su momento, que el cableado no trae.**
+
+**Dos controles estaban mal**, y los dos a favor de algo que no era el looming:
+"se aleja" arrancaba con un disco que tapaba el ojo entero y se achicaba rápido
+(disparaba a LC4 a 57 Hz por el golpe de luz), y la medida promediada diluía el
+looming. Corregidos: "se aleja" arranca en radio 6 y ya presente, y la medida
+pasa a ser el pico en cualquier ventana de 250 ms.
+
+**Decisión: la salida pasa a ser LPLC2/LC4**, no la fibra gigante. Es lo que se
+puede afirmar sin exagerar —*los detectores de looming de la mosca, con ojos de
+verdad, deciden la esquiva*— y aprovecha la parte que funciona. Entrenar los
+parámetros del cerebro central contra la tarea de escapar, como `flyvis` hizo con
+la visión, queda como el proyecto de fondo.
+
+### Con los controles corregidos: LPLC2 pasa, LC4 no
+
+Pico en Hz en cualquier ventana de 250 ms (`python fly/acople.py`):
+
+| ganancia | estímulo | LPLC2 | LC4 | DNp01 |
+|---|---|---|---|---|
+| 3 | **looming** | **3,4** | 5,0 | 2 |
+| 3 | se aleja | 0,7 | 11,8 | 52 |
+| 3 | desplaza al centro | 0,4 | 1,4 | 4 |
+| 3 | desplaza arriba | 1,0 | 1,5 | 0 |
+| 3 | oscurece | 1,5 | 3,1 | 0 |
+| 6 | **looming** | **9,9** | 29,7 | 2 |
+| 6 | se aleja | 3,6 | 20,1 | 98 |
+| 6 | desplaza al centro | 3,6 | 17,7 | 86 |
+| 6 | desplaza arriba | 3,9 | 9,6 | 8 |
+| 6 | oscurece | 4,8 | 18,1 | 0 |
+
+A ganancia 1,5 no se mueve nada: el ojo no alcanza a empujar al conectoma.
+
+- **LPLC2 separa el looming de los cuatro controles**, a ganancia 3 (2,3× el mejor
+  control) y a 6 (2,1×). Le gana incluso a "oscurece", que tiene la misma
+  cantidad de oscuridad sin forma ni movimiento. Es el resultado que se buscaba, y
+  cuadra con la biología: LPLC2 es el detector de looming selectivo (Klapoetke et
+  al., 2017).
+- **LC4 no es selectivo.** Responde casi igual a oscurecer, a alejarse y a
+  desplazarse. No sirve como salida.
+- **La fibra gigante hace lo contrario que en la mosca**: se dispara con lo que se
+  aleja y con lo que pasa por delante (52-98 Hz) y se queda callada con el looming.
+  Es la inhibición de más arriba; se mide pero no decide.
+
+**Cómo leer esto sin engañarse.** Es una sola semilla, y el margen es justo: el
+criterio pide 2× y LPLC2 da 2,1-2,3×. Hay además un sesgo conocido en "se aleja":
+los primeros 200 ms el disco está quieto, y como el acople mide sobre el reposo en
+gris, las células tónicas del ojo (L2, Tm5b, TmY4, Mi9) empujan todo ese rato
+aunque nada se mueva. No se comprobó si eso es lo que dispara a LC4 y a la fibra
+gigante en ese control.
+
+**La salida es LPLC2, sola.** Para cablearla a la esquiva falta lo que el
+experimento no tiene: dibujar el mundo del juego en la retina de `flyvis` (hoy los
+estímulos son discos sintéticos) y fijar un umbral de LPLC2 entre el mejor control
+y el looming.

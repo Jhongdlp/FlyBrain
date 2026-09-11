@@ -58,9 +58,17 @@ def estimulos():
     # aparecer el disco de golpe a un costado e inflaba el movimiento "hacia
     # afuera", que es justo lo que había que descartar.
     viaje = np.linspace(-22, 22, CUADROS)
+    # El que se aleja recorre el looming al revés, pero **solo hasta radio 6**, y
+    # arranca ya presente. La primera versión invertía el looming entero:
+    # empezaba con un disco que tapaba todo el ojo y se achicaba rápido, y ese
+    # golpe de luz disparaba a LC4 a 57 Hz sin nada que ver con alejarse.
+    tramo = loom[(loom > 0) & (loom <= 6.0)][::-1]
+    aleja = np.zeros(CUADROS)
+    aleja[:20] = tramo[0]
+    aleja[20:20 + len(tramo)] = tramo[:CUADROS - 20]
     return {
         "looming": disco(loom),
-        "se_aleja": disco(loom[::-1]),
+        "se_aleja": disco(aleja),
         "desplaza_centro": disco(np.full(CUADROS, 4.0), viaje),
         "desplaza_arriba": disco(np.full(CUADROS, 4.0), viaje, cy=7.0),
         # La misma cantidad de oscuridad que el looming, sin forma ni movimiento.

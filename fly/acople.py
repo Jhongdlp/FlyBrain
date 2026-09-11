@@ -39,9 +39,13 @@ GANANCIAS = (1.5, 3.0, 6.0)
 # con la célula de flyvis más cercana. Las dos grillas no coinciden punto a punto
 # (una es cuadrada en sus coordenadas y la otra hexagonal).
 EMPAREJAR = 0.75
-# A partir de cuándo mirar la respuesta: el disco del looming aparece a los
-# 200 ms y el choque es a los 1.000.
-DESDE_MS = 200.0
+# La medida es el **pico**: la tasa máxima en cualquier ventana de 250 ms. La
+# primera versión promediaba de los 200 ms al final, y el looming —que hace todo
+# en los últimos 250 ms antes del choque— quedaba diluido: LC4 llegaba a 43 Hz
+# en ese tramo y el promedio decía 8,8. El pico además es justo con todos los
+# estímulos (ninguno tiene "su" ventana) y es lo que va a usar el juego: el boss
+# reacciona cuando la tasa cruza un umbral, en el momento que sea.
+VENTANA_MS = 250.0
 
 
 class Acople:
@@ -97,6 +101,14 @@ class Acople:
         return np.concatenate(salida), sim.p
 
 
+def pico(disparos, idx, p, ventana_ms=VENTANA_MS):
+    """Tasa máxima del grupo, en Hz, en cualquier ventana de `ventana_ms`."""
+    por_paso = disparos[:, idx].sum(axis=1).astype(float)
+    n = int(ventana_ms / p.dt)
+    suma = np.convolve(por_paso, np.ones(n), mode="valid")
+    return float(suma.max() / idx.size / (ventana_ms / 1000.0))
+
+
 def cargar(nombre):
     z = np.load(DATOS / f"flyvis_{nombre}.npz")
     tipos = [k[2:] for k in z.files if k.startswith("r_")]
@@ -121,7 +133,6 @@ def main():
         "DNp01": red.indices("DNp01"),
     }
     todas = np.arange(red.n)
-    desde = int(DESDE_MS / R.Parametros().dt)
 
     print(f"\n{'ganancia':>8} {'estímulo':16}" + "".join(f"{g:>9}" for g in grupos) + "   red Hz")
     tabla = {}
@@ -129,15 +140,19 @@ def main():
         for nombre in ESTIMULOS:
             resp, _ = cargar(nombre)
             d, p = ac.correr(resp, g)
-            fila = {k: R.hz(d[desde:], v, p) for k, v in grupos.items()}
+            fila = {k: pico(d, v, p) for k, v in grupos.items()}
             tabla[(g, nombre)] = fila
             print(f"{g:8} {nombre:16}" + "".join(f"{fila[k]:9.1f}" for k in grupos)
                   + f"   {R.hz(d, todas, p):5.1f}", flush=True)
         print()
 
-    print("--- veredicto: ¿el looming le gana a cada control? ---")
+    # La salida es LPLC2/LC4, no la fibra gigante: con ojos de verdad, la
+    # inhibición del cerebro central —GABAérgica, real en el cableado, pero sin
+    # su fuerza y su momento correctos en un modelo sin entrenar— apaga a DNp01
+    # justo durante el looming. DNp01 se sigue midiendo, pero no decide.
+    print("--- veredicto: ¿el pico del looming le gana al de cada control? ---")
     for g in GANANCIAS:
-        for k in grupos:
+        for k in ("LPLC2", "LC4"):
             loom = tabla[(g, "looming")][k]
             peor = max(tabla[(g, n)][k] for n in ESTIMULOS[1:])
             print(f"  ganancia {g:4}  {k:6} looming {loom:6.1f} Hz · mejor control {peor:6.1f} Hz · "
