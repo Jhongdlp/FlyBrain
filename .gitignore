@@ -11,3 +11,4 @@ pantalla*.png
 # El conectoma: 540 MB, público, se baja con fly/paso0.py --descargar
 data/
 .venv-ojo/
+*.mp4

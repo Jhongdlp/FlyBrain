@@ -182,15 +182,22 @@ def somas(red: Red) -> np.ndarray:
     cuerpo celular fuera del sistema nervioso (en el ojo, en la periferia). Se
     simulan igual; solo no hay dónde dibujarlas.
     """
+    loc = columna(red, "somaLocation")
+    pos = np.full((red.n, 3), np.nan, np.float32)
+    tiene = np.array([x is not None for x in loc])
+    pos[tiene] = np.stack(loc[tiene]).astype(np.float32)
+    return pos
+
+
+def columna(red: Red, nombre: str) -> np.ndarray:
+    """Una columna de `anotaciones.feather`, en el orden de `red`. `None` donde falta."""
     import pandas as pd
 
-    ann = pd.read_feather(DATOS / "anotaciones.feather")[["type", "somaLocation"]]
+    ann = pd.read_feather(DATOS / "anotaciones.feather")[["type", nombre]]
     ann = ann[ann["type"].notna()].reset_index(drop=True)
     # El orden de `red` sale del mismo filtro. Si alguna vez dejan de coincidir,
-    # cada neurona se dibujaría en el lugar de otra y nada lo delataría.
+    # cada neurona quedaría con la anotación de otra y nada lo delataría.
     assert len(ann) == red.n and (ann["type"].to_numpy().astype(str) == red.tipo).all(), \
         "las anotaciones no están en el orden de la red: borrá data/red.npz"
-    pos = np.full((red.n, 3), np.nan, np.float32)
-    tiene = ann["somaLocation"].notna().to_numpy()
-    pos[tiene] = np.stack(ann.loc[tiene, "somaLocation"].to_numpy()).astype(np.float32)
-    return pos
+    col = ann[nombre].astype(object)
+    return col.where(col.notna(), None).to_numpy()

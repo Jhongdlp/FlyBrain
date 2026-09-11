@@ -251,6 +251,28 @@ impl VecEnv {
         OBS_DIM
     }
 
+    /// Lo que tiene a la vista el boss del entorno `i`, para dibujarlo en la
+    /// retina de la mosca (`fly/ojo_flyvis.py`): `(x, y, facing, radio)` del boss, y
+    /// `(k, 3)` con `[x, y, radio]` del jugador —primera fila— y de cada
+    /// proyectil en vuelo. Solo lectura: dibujar no es una regla de juego, y lo
+    /// que la mosca decida al verlo igual queda en el log.
+    fn escena<'py>(
+        &self,
+        py: Python<'py>,
+        i: usize,
+    ) -> PyResult<((f32, f32, f32, f32), Bound<'py, PyArray2<f32>>)> {
+        let e = self.envs.get(i).ok_or_else(|| PyValueError::new_err("entorno fuera de rango"))?;
+        let w = &e.w;
+        let cuerpos = core::iter::once((w.player.pos, w.player.radius))
+            .chain(w.projectiles.iter().map(|p| (p.pos, p.radius)));
+        let a = PyArray2::<f32>::zeros(py, [1 + w.projectiles.len(), 3], false);
+        let s = unsafe { a.as_slice_mut().unwrap() };
+        for ((pos, r), o) in cuerpos.zip(s.chunks_mut(3)) {
+            o.copy_from_slice(&[pos.x, pos.y, r]);
+        }
+        Ok(((w.boss.pos.x, w.boss.pos.y, w.boss.facing, w.boss.radius), a))
+    }
+
     /// El log de la pelea en curso del entorno `i`, listo para el navegador
     /// (`web/public/<nombre>.bin`, `?pelea=<nombre>`).
     ///

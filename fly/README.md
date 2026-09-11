@@ -12,12 +12,16 @@ ojo.py         la retina: a dónde mira cada fotorreceptor; columnas derivadas
 ojo_flyvis.py  el ojo de flyvis mira los estímulos (corre en .venv-ojo)
 acople.py      la salida de flyvis entra en MaleCNS y se mide LPLC2/LC4/DNp01
 oponente.py    el jugador guionado: rodea la cobertura, recupera el tiro y dispara
+patas.py       las motoneuronas de las patas, y si DNa02 y el tacto giran la marcha
+cordon.py      el cordón ventral como modelo de tasas (Pugliese et al. 2025)
 ```
 
 ```bash
 python fly/paso0.py --descargar    # 540 MB, bucket público, una sola vez
 python fly/sobresalto.py           # ~2 min en CPU
 python fly/piloto.py               # ~12 min: la mosca contra su control
+python fly/patas.py                # ~30 min: ¿DNa02 y el tacto giran las patas?
+python fly/piloto.py --andar       # ~25 min: camina, con el tacto cruzado de control
 python fly/piloto.py --grabar      # ~3 min: una pelea para verla en el navegador
 ./scripts/dev.sh                   # y abrir http://localhost:5173/?pelea=mosca
 ```
@@ -413,3 +417,253 @@ gigante en ese control.
 experimento no tiene: dibujar el mundo del juego en la retina de `flyvis` (hoy los
 estímulos son discos sintéticos) y fijar un umbral de LPLC2 entre el mejor control
 y el looming.
+
+## Las patas: la mosca camina
+
+MaleCNS no es solo el cerebro: trae el cordón ventral, que en la mosca hace lo
+que la médula espinal, con **381 motoneuronas de pata** anotadas por pata
+(delantera, media, trasera) y lado. El boss camina leyéndolas a ellas, no a las
+descendentes: lo que lo mueve es lo que llega a los músculos.
+
+```
+lo que ve → red → cordón ventral → motoneuronas de las seis patas → avance y giro
+lo que toca → sensores táctiles de las patas ↗
+```
+
+**La lectura (`piloto.py`) es tracción diferencial.** Cada lado empuja en
+proporción a lo que disparan sus motoneuronas en el tick: la suma da la
+velocidad (el boss camina esa fracción de los ticks) y la diferencia gira el
+rumbo. Es la simplificación grande: ni marcha, ni fases de apoyo y vuelo, ni
+flexores contra extensores. Cada pata es "cuánto empuja".
+
+**Lo que pusimos a mano:**
+
+- `GIRO`, `PASO`: cuánto gira una asimetría y cuántos disparos valen un paso.
+  `GIRO` está anclado a DNa02 (su efecto medido gira ~75°/s, el orden de una
+  mosca caminando).
+- `CERO`: a la asimetría se le resta su promedio de los últimos 2 s. El LIF sin
+  calibrar tiene un sesgo de lado —en una pelea las patas derechas empujaban
+  +0,046 todo el tiempo, en otra semilla al revés— y sin quitarlo el boss daba
+  vueltas en un solo sentido (98% antihorario). Se come también una orden de
+  giro sostenida más de 2 s.
+- **Nadie le ordena caminar.** La primera versión encendía la marcha con
+  corriente en DNg100 (BDN2). El control sin ella dio lo mismo: 46 disparos de
+  pata por tick con y sin. Las patas las despierta la red entera cuando el
+  jugador se acerca; la corriente solo las adelantaba 14 ticks. Se quitó.
+- `ALCANCE`, `TACTO`: desde qué distancia toca una pata la pared, y cuánta
+  corriente es un toque (la de `patas.py`, que lleva a los sensores a ~25 Hz).
+
+### El giro está en el cableado
+
+| entrada | a un salto | a dos saltos |
+|---|---|---|
+| DNa02 izquierda | solo patas izquierdas | inhibe las izquierdas, excita las derechas |
+| tacto, pata media izquierda | 765 sinapsis a su pata | 481k/462k a las izquierdas contra 39k/48k a las derechas |
+| MDN (caminar hacia atrás) | casi nada | sobre todo patas traseras (288k contra 87k delanteras) |
+
+Las tres coinciden con lo que se sabe de la mosca. DNa02 es como gira un insecto
+(las patas de adentro frenan); el tacto sería un reflejo de evitación (pared a la
+izquierda → empujan las izquierdas → se aparta).
+
+### DNa02 no sobrevive a la simulación; el tacto sí, por poco
+
+`patas.py` pone la marcha, estimula la entrada por un lado y después por el otro
+—pareado por semilla, 12 semillas— y compara con pares bilaterales de
+descendentes al azar. Criterio fijado antes de ver los números: t > 2,5 y por
+encima de la media de cualquier control.
+
+```
+          s0     s1     s2     s3     s4     s5     s6     s7     s8     s9     s10    s11      media
+DNa02      +0.9   +0.2   +2.2   +0.0   -1.4   +1.9   -0.0   +0.9   -0.6   +1.8   -0.0   -0.8   +0.43
+tacto      -1.2   -0.6   -0.6   +0.7   -1.6   +0.6   +0.4   -3.3   -0.6   -2.0   -1.2   -2.3   -0.98
+DNg56      -1.5   -0.1   +0.1   +0.1   +0.4   +0.8   +0.0   +0.3   -0.7   -0.5   -0.9   +1.7   -0.03
+DNge062    -0.5   +0.5   -0.9   -0.4   -0.4   -0.8   -0.1   +0.1   -0.3   +0.4   -0.6   +1.0   -0.17
+DNp55      +1.2   -0.1   +0.3   -0.1   -1.0   +0.8   +0.4   +0.9   -1.5   +0.6   -0.1   +0.2   +0.13
+DNge129    +0.1   -0.1   -0.2   +0.0   -0.0   -0.2   -1.0   +0.6   +0.5   -1.0   +0.2   -0.1   -0.10
+
+  controles: |media| hasta 0.17 Hz
+  DNa02: +0.43 Hz con el signo del cableado, t = 1.3 · A MEDIAS: el signo del cableado, pero no se separa del ruido
+  tacto: +0.98 Hz con el signo del cableado, t = 2.8 · PASA: gira como predice el cableado, y una descendente cualquiera no
+```
+
+**Con 6 semillas el tacto no pasaba** (−0,44, t = 1,1) y la primera versión del
+criterio le había dado un PASA a DNa02 con t = 1,3. Las dos cosas están
+documentadas en el código porque son el tipo de error que se repite.
+
+**Por qué DNa02 se pierde y el tacto apenas pasa.** A escala 0.03, los 369
+sensores táctiles de una pata a 25 Hz le dan a cada motoneurona de esa pata
+~0,05 de corriente, con el umbral en 1: la vía directa es veinte veces demasiado
+débil. Lo que mueve las patas es la red entera encendiéndose en bloque —pasan de
+2 a 6 Hz según la semilla— y ese modo global tapa casi todo lo que viene de un
+solo lado. El tacto son ~900 sensores por lado y sesga ese modo lo justo; DNa02
+son dos neuronas. La fibra gigante funciona porque recibe miles de sinapsis de
+LC4 y LPLC2; ninguna vía de pata tiene eso.
+
+**Subirle la ganancia al cordón ventral lo empeora.** Multiplicando sus sinapsis
+por 3, se enciende solo (14 Hz en las patas sin estímulo) y los contrastes pasan
+a ±10 Hz de ruido; por 10, convulsiona (82 Hz sin nada). No es un problema de
+ganancia sino de modelo: es la misma pared que el lóbulo óptico. Muchas
+premotoras del cordón ventral son de voltaje graduado, sin espigas, y un LIF
+uniforme no las representa.
+
+### En el juego: el tacto la aparta de las paredes
+
+El tacto entra por los 16 rayos que el motor ya pone en la observación, igual que
+el looming: el motor da la geometría, las neuronas deciden. Cada rayo que ve una
+pared a menos de `ALCANCE` (1,4: el radio del boss más el largo de una pata)
+excita los sensores táctiles de las patas de ese lado, con la corriente con la
+que pasó `patas.py`. El control es el **tacto cruzado**: la pared de la derecha
+entrando por los sensores de la izquierda. Si apartarse es del cableado, cruzado
+tiene que pegarla más a la pared, no menos.
+
+`python fly/piloto.py --andar`, 900 ticks contra el oponente, dos peleas:
+
+```
+=== patas: ¿camina? ===
+                pelea  se mueve  recorrió  arena  contra pared  giro °/s  esquivas
+  tacto            1       95%        63    21%           36%        42        19
+  tacto            2       97%        61    20%           32%        38        14
+  cruzado          1       72%        31     8%           79%        37        21
+  cruzado          2       81%        37    13%           72%        52        29
+  sin tacto        1       86%        48    16%           79%        35        21
+  sin tacto        2       90%        45    16%           72%        40        23
+```
+
+**Con el tacto como está cableado pasa un tercio del tiempo contra la pared;
+sin tacto, o con el tacto cruzado, tres cuartos.** Cruzado no la pega más que
+sin tacto —estar contra la pared ya es el techo—, pero no la aparta: lo que la
+aparta es que la pared entre por el lado correcto. Recorre más y ve más arena
+porque no se queda deslizando contra un borde.
+
+**Anticipar el toque no la aparta más.** Con `ALCANCE` 2 y 3 (la pata "llega"
+más lejos) el tacto sigue en un tercio del tiempo contra la pared (44/24% y
+35/38%, contra 79% cruzado): el tacto satura ahí, toque cuando toque.
+
+**En las peleas grabadas, esquivar paredes es mecánico** (`piloto.virar`): con
+pared a menos de 3 por delante, el rumbo gira hacia donde los rayos ven más
+sitio libre. Pasa del 32-36% del tiempo contra la pared al 0-2%. **No es la
+mosca**: es para que el juego se vea bien, se enciende solo con
+`Piloto(grabar=True)`, y los experimentos de este README la miden sin él. Se
+quita cuando el tacto, los ojos o `cerebro.py` la aparten solos.
+
+Dos peleas por condición: el tamaño del efecto es incierto. Una versión anterior
+con los lados espejados (izquierda y derecha del motor al revés que el render)
+dio 58% contra 68% en las mismas peleas: misma dirección, efecto mucho menor.
+
+**Camina, y lo que la mueve son sus motoneuronas.** Pero hay que decir qué es:
+fuera del tacto, **los giros son ruido del cordón ventral, no decisiones.** Lejos
+de las paredes nada dirige el rumbo —DNa02 no sobrevive— y es un paseo al azar
+con la estadística de la red. (Las moscas reales pasan casi todo el tiempo en los
+bordes de una arena, y la nuestra también; la diferencia es que la real lo busca.)
+
+**En el navegador se dibuja caminando** (`web/src/mosca.ts`): apoyada en el
+suelo, en trípode, con las alas plegadas y quietas, y solo despega en la
+esquiva. **El paso dibujado es cosmético**: el motor no sabe de patas, y el
+dibujo no lee las motoneuronas. Avanza con lo que se movió el cuerpo, que sí
+sale de ellas.
+
+**Los ojos** llegan a las patas en `ojo_juego.Mosca`: los dos ojos por `flyvis`,
+el conectoma, y las mismas patas, tacto y lectura de `Piloto`. Su experimento de
+paredes (con ojos, ciega, ojos cruzados) está en ese archivo.
+
+### El cordón ventral con tasas (`cordon.py`)
+
+Pugliese et al. (2025) simularon el cordón ventral de cuatro conectomas,
+MaleCNS incluido, y DNg100 hizo caminar a las patas desde un circuito de tres
+neuronas (E1 IN17A001, E2 INXXX466, I1 IN16B036). Usaron **tasas, no espigas**,
+porque las premotoras del cordón son de voltaje graduado: la misma pared que se
+sospechaba acá. `cordon.py` es su modelo, con sus parámetros sorteados y su
+subred (motoneuronas de pata, sus premotoras, y las descendentes que les
+hablan), escalados por el volumen de cada neurona.
+
+Tres cosas hicieron falta, las tres medidas antes de corregirlas:
+
+- **El volumen de cada neurona.** Sin él no hay ritmo (lo dicen ellos y acá
+  tampoco lo había). No está en los archivos planos: sale de la tabla de
+  neuronas de neuPrint del bucket público.
+- **Descendentes como entradas puras.** `red.W` suma las sinapsis de todo el
+  sistema nervioso, y descendente↔ascendente en el cerebro cerraba bucles que el
+  cordón no tiene: cualquier descendente prendía 1.100 de 3.166 neuronas.
+- Un error mío que aplanaba las trazas (vistas de numpy en vez de copias):
+  durante dos corridas todo dio ritmo 0.
+
+**El ritmo se reproduce a medias.** El núcleo de tres neuronas solo oscila en 16
+de 16 réplicas. Con la subred entera, DNg100 hace oscilar a las patas en las 6
+réplicas (ritmo 0,47-0,79) **a 8-11 Hz**, la frecuencia de paso de la mosca.
+Pero no es especial: de 295 tipos de descendente queda en el puesto 45, y el
+21% supera 0,5 contra el 3,4% del paper. Nuestra red oscila demasiado fácil;
+ellos ajustaban la corriente por réplica y tenían más premotoras (4.310
+neuronas contra 3.166; las sin tipo son solo el 1% de la entrada a las
+motoneuronas, así que no es eso).
+
+**DNa02 llega a las patas**, lo que en el LIF nunca pasó
+(`python fly/cordon.py --giro`, el experimento de `patas.py`, 12 semillas):
+
+```
+controles: |media| hasta 0.04 Hz
+DNa02: −1,81 Hz, t = −21,8 (12 de 12)      LIF: +0,43, t = 1,3
+tacto: −3,79 Hz, t = −3,0                  LIF: +0,98, t = 2,8
+```
+
+Los dos llegan con el signo contrario al que suponía `patas.py`: activar un lado
+prende más las motoneuronas de ese lado. "Más actividad" no es "empuja más"
+—son flexores y extensores, apoyo y vuelo—, así que el signo de la lectura hay
+que anclarlo en algo conocido. El ancla natural es DNa02, que en la mosca gira
+hacia su lado (Rayshubskiy et al. 2020). Con esa ancla, el tacto la aparta de la
+pared.
+
+**Por qué todavía no está en el juego.** Dos cosas, medidas:
+
+- **El cerebro no manda la marcha.** En la pelea grabada, DNg100, DNa02 y DNa01
+  están en 0 Hz, y MDN (caminar hacia atrás) dispara a 23 Hz de un solo lado.
+  Pasarle al cordón las descendentes como salen del LIF le rompe el ritmo
+  (0,13-0,32) y deja las patas tónicas a 12-21 Hz, con o sin DNg100. Lo que
+  falta ahora está arriba: el LIF del cerebro central no da las órdenes.
+- **El tacto no es un reflejo limpio, es un interruptor.** Con la marcha puesta,
+  un toque de 1 Hz la gira *hacia* la pared (6 de 6 semillas); desde 2 Hz el
+  cordón entero salta a un estado 50 veces más activo y ahí sí la aparta, más
+  cuanto más fuerte (t 2,4 a 10). Llevarlo así al juego sería elegir la perilla
+  que dé.
+
+**El sistema nervioso entero en tasas, sin entrenar, tampoco.** Las 164.506
+neuronas corren (400 ms en ~27 s) y el tacto llega al cerebro del lado correcto
+—tocar a la izquierda le da a DNa01 derecha 185 de entrada contra 36 a la
+izquierda—, pero el escalado por tamaño contra la mediana de *todas* las
+neuronas, que bajan las 89.000 diminutas del lóbulo óptico, deja a las
+descendentes con umbrales de 300-700. Barriendo esa referencia hay un
+precipicio: a 1× el cerebro está mudo y DNg100 ni mueve las patas; desde 2× se
+prenden 37-47 mil neuronas, el lóbulo óptico se enciende a oscuras, y DNa02
+responde pero no según el lado. Es la franja estrecha del LIF otra vez: un
+número global no alcanza.
+
+### La mosca espinal (`python fly/piloto.py --grabar --espinal`)
+
+Las patas las mueve el cordón de tasas (`cordon.Espinal`), con la marcha puesta
+y el tacto por sus sensores; las descendentes del LIF no entran, porque le
+rompen el ritmo. El cerebro sigue decidiendo la esquiva. Giro anclado en DNa02
+(una DNa02 sola ≈ 75°/s), valores fijados antes de la primera pelea:
+
+```
+             contra pared   giro
+tacto         53% / 39%     10°/s
+cruzado       56% / 39%     9-14°/s
+```
+
+**Camina, y no se aparta.** El tacto espinal no se distingue de su control
+cruzado, y casi no gira: anclado en DNa02, el efecto del tacto en el cordón es
+chico. Se ve en el navegador en `?pelea=espinal`.
+
+### Lo que falta
+
+- **Que el cerebro central mande las descendentes correctas** (DNg100 al
+  caminar, DNa02 al girar). Es el mismo trabajo que `flyvis` hizo con el ojo:
+  parámetros por tipo celular entrenados contra una tarea. Con el cordón de
+  tasas, lo de abajo ya transmite.
+- **Parámetros por tipo celular en el cordón ventral**, entrenados como los de
+  `flyvis` en el lóbulo óptico. Es lo que haría falta para que DNa02 llegue a
+  las patas por su vía y no por el modo global, y para que el tacto pase con
+  holgura en vez de por poco.
+- **Un cuerpo** (NeuroMechFly): de "cuánto empuja cada lado" a músculos,
+  articulaciones y marcha.
+- **Las alas**: 67 motoneuronas de ala, con los músculos de potencia (DLM, DVM).
+  Con la red encendida disparan a 40-60 Hz, sin que nada lo pida.

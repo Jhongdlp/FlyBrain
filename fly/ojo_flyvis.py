@@ -1,8 +1,8 @@
 """El ojo: `flyvis` mira un estímulo y deja lo que respondió cada neurona.
 
-Corre en su propio entorno (`.venv-ojo`, Python 3.11: `flyvis` no soporta 3.14)
-y se comunica con el resto por archivos. Además de la compatibilidad, así el
-LIF no carga PyTorch en memoria al mismo tiempo: juntos no entran en 6 GB.
+Corre en su propio entorno (`.venv-ojo`, Python 3.11: `flyvis` no soporta 3.14).
+El LIF también corre ahí si hace falta tenerlos juntos (`ojo_juego.py`): los dos
+cargados ocupan 1,3 GB.
 
 `flyvis` es el modelo de Lappalainen et al. (Nature, 2024): la conectividad del
 sistema visual sale del conectoma y solo 734 parámetros —unos pocos por tipo
@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import flyvis
+from scipy.special import ndtr
 from flyvis.utils import hex_utils
 from flyvis.utils.activity_utils import LayerActivity
 
@@ -39,6 +40,112 @@ U, V = hex_utils.get_hex_coords(15)
 _x, _y = map(lambda a: np.asarray(a, float), hex_utils.hex_to_pixel(U, V))
 PASO = np.sort(np.hypot(_x - _x[0], _y - _y[0]))[1]
 X, Y = _x / PASO, _y / PASO  # posición de cada columna, en columnas
+
+
+# Hacia dónde mira cada columna, para dibujar el juego. La grilla de `flyvis` no
+# trae orientación; sale de la calibración de T5: T5a prefiere -x y T5c +y, y en
+# la mosca T5a es de adelante hacia atrás y T5c hacia arriba (Maisak et al.,
+# 2013). Así que +x es adelante y +y arriba, y ésta es la grilla del ojo derecho.
+GRADOS = 5.0       # entre omatidios vecinos
+CENTRO_AZ = 75.0   # el centro del ojo derecho, en grados a la derecha del frente
+ACEPTANCIA = 5.0   # ancho a media altura de lo que ve un omatidio
+AZ = np.radians(CENTRO_AZ - X * GRADOS)
+EL = np.radians(Y * GRADOS)
+
+
+SIGMA = np.radians(ACEPTANCIA) / 2.355
+
+# La arena: el borde es un muro (el motor lo trata como pared: ni los cuerpos
+# ni los rayos lo cruzan). Con franjas verticales, porque un muro liso no le da
+# movimiento al ojo y la mosca no lo podría ver venir.
+MURO_ALTO = 2.4    # ALTURA_MURO en render.ts
+OJO_ALTO = 0.5     # la cabeza de la mosca sobre el piso
+FRANJA = 2.0       # período de las franjas, en unidades del mundo
+SUELO = 0.8 * FONDO
+
+
+def muros(ojo_xy, rumbo, az, arena):
+    """Luminancia del borde de la arena `(ancho, alto)` en cada columna.
+
+    Cada columna tira un rayo horizontal hasta el borde. El muro ocupa las
+    elevaciones entre el piso y su altura a esa distancia; arriba es fondo y
+    abajo el piso. Las franjas pierden contraste con la distancia como en un ojo
+    de verdad: la aceptancia gaussiana del omatidio es un filtro, y franjas más
+    finas que una columna producirían aliasing —movimiento que no existe.
+    """
+    fi = rumbo + az
+    c, s = np.cos(fi), np.sin(fi)
+    ex, ey = ojo_xy
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tx = np.where(c > 0, (arena[0] - ex) / c, np.where(c < 0, -ex / c, np.inf))
+        ty = np.where(s > 0, (arena[1] - ey) / s, np.where(s < 0, -ey / s, np.inf))
+    d = np.maximum(np.minimum(tx, ty), 1e-3)
+    en_x = tx < ty
+    a_lo_largo = np.where(en_x, ey + d * s, ex + d * c)
+    oblicuo = np.maximum(np.where(en_x, abs(c), abs(s)), 1e-3)
+    f = d / (FRANJA * oblicuo)  # ciclos por radián
+    contraste = 0.6 * np.exp(-2 * (np.pi * SIGMA * f) ** 2)
+    muro = FONDO * (1 + contraste * np.sin(2 * np.pi * a_lo_largo / FRANJA))
+    arriba, abajo = np.arctan2(MURO_ALTO - OJO_ALTO, d), np.arctan2(-OJO_ALTO, d)
+    w = ndtr((arriba - EL) / SIGMA) * ndtr((EL - abajo) / SIGMA)
+    return w * muro + (1 - w) * np.where(EL < abajo, SUELO, FONDO)
+
+
+def retina_de(ojo_xy, rumbo, objetos, lado=1, arena=None):
+    """Luminancia en las 721 columnas de un ojo, parado en `ojo_xy` y con el
+    cuerpo mirando hacia `rumbo` (radianes, como `facing` en el motor).
+
+    `lado` 1 es el ojo derecho y -1 el izquierdo: el mismo ojo en espejo, así
+    la grilla de `flyvis` sigue con +x adelante en los dos. El mundo del motor
+    es y-abajo, así que un ángulo positivo respecto del rumbo queda a la
+    derecha. `arena` agrega el borde como muro (`muros`).
+
+    Cada objeto `[x, y, radio]` es una esfera oscura a la altura del ojo. Cada
+    omatidio promedia con una gaussiana de `ACEPTANCIA`: sin eso un proyectil
+    más chico que una columna parpadea al pasar entre ellas.
+    """
+    az_col = lado * AZ
+    lum = np.full(len(X), FONDO) if arena is None else muros(ojo_xy, rumbo, az_col, arena)
+    for x, y, r in objetos:
+        dx, dy = x - ojo_xy[0], y - ojo_xy[1]
+        d = np.hypot(dx, dy)
+        if d <= r:
+            continue
+        az = np.arctan2(dy, dx) - rumbo
+        alfa = np.arcsin(r / d)
+        delta = np.arccos(np.clip(np.cos(EL) * np.cos(az_col - az), -1.0, 1.0))
+        lum *= 1.0 - (ndtr((alfa - delta) / SIGMA) - ndtr((-alfa - delta) / SIGMA))
+    return lum
+
+
+class EnVivo:
+    """El ojo en lazo cerrado: los dos ojos en un lote, un tick por vez,
+    arrastrando su estado. Lo que ve en un tick depende de lo que hizo el cuerpo
+    en el anterior, así que no se puede mirar la película entera de una vez.
+
+    `ver(cuadros)` con `(ojos, 721)` devuelve por tipo la respuesta sobre el
+    reposo, `(ojos, 721)`, promediada en los `subpasos` del tick.
+    """
+
+    def __init__(self, ojo, tipos, dt, subpasos, ojos=2):
+        self.red, self.dt, self.sub = ojo.red, dt, subpasos
+        self.idx = {t: np.flatnonzero(ojo.tipo == t) for t in tipos}
+        gris = torch.full((ojos, 1, len(X)), FONDO)
+        with torch.no_grad():
+            estado = self.red.fade_in_state(1.0, dt, gris)
+            quieto = self.red.simulate(gris[:, None].expand(ojos, 100, 1, len(X)), dt,
+                                       initial_state=estado, as_states=True)
+        self.estado = quieto[-1]
+        self.reposo = quieto[-1].nodes.activity.numpy().copy()
+
+    def ver(self, cuadros):
+        mov = torch.tensor(cuadros.astype(np.float32))[:, None, None, :]
+        with torch.no_grad():
+            estados = self.red.simulate(mov.expand(-1, self.sub, 1, -1), self.dt,
+                                        initial_state=self.estado, as_states=True)
+        self.estado = estados[-1]
+        a = torch.stack([e.nodes.activity for e in estados]).mean(0).numpy() - self.reposo
+        return {t: a[:, i] for t, i in self.idx.items()}
 
 
 def disco(radio, cx=None, cy=0.0):
@@ -85,10 +192,10 @@ class Ojo:
         self.nu = np.asarray(c.nodes.u[:], float)
         self.nv = np.asarray(c.nodes.v[:], float)
 
-    def mirar(self, cuadros):
+    def mirar(self, cuadros, dt=DT):
         mov = torch.tensor(cuadros.astype(np.float32))[:, None, :]
-        estado = self.red.fade_in_state(1.0, DT, mov[[0]])
-        r = self.red.simulate(mov[None], DT, initial_state=estado).cpu()
+        estado = self.red.fade_in_state(1.0, dt, mov[[0]])
+        r = self.red.simulate(mov[None], dt, initial_state=estado).cpu()
         return LayerActivity(r, self.red.connectome, keepref=True)
 
     def posicion(self, tipo):

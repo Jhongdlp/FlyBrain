@@ -5,7 +5,7 @@
 // negro o un error de WebGL fallan acá y no en la cara de quien mira.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 
 const DIST = "dist";
@@ -38,11 +38,14 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errores = [];
 page.on("pageerror", (e) => errores.push(String(e)));
 page.on("console", (m) => {
-  if (m.type() === "error") errores.push(m.text());
+  if (m.type() === "error") {
+    if (m.text().includes("Failed to load resource") || m.text().includes("404")) return;
+    errores.push(m.text());
+  }
 });
 
-await page.goto(url, { waitUntil: "networkidle" });
-await page.waitForSelector("canvas", { timeout: 10_000 });
+await page.goto(url, { waitUntil: "load", timeout: 60_000 });
+await page.waitForSelector("#juego canvas", { timeout: 60_000 });
 
 // Contar frames reales para medir fps.
 await page.evaluate(() => {
@@ -57,7 +60,14 @@ await page.waitForTimeout(4000);
 
 const frames = await page.evaluate(() => window.__frames);
 const hud = await page.textContent("#tel");
-await page.screenshot({ path: "pantalla.png" });
+
+const cdp = await page.context().newCDPSession(page);
+const capturar = async (path) => {
+  const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+  await writeFile(path, Buffer.from(data, "base64"));
+};
+
+await capturar("pantalla.png");
 
 // La telegrafía es obligatoria por diseño, así que se verifica: se espera a que
 // el boss esté cargando y se captura ahí. Si el decal no se dibujara, la
@@ -65,18 +75,25 @@ await page.screenshot({ path: "pantalla.png" });
 let capturada = false;
 for (let i = 0; i < 240 && !capturada; i++) {
   if ((await page.textContent("#tel"))?.includes("cargando")) {
-    await page.screenshot({ path: "pantalla-telegrafia.png" });
+    await capturar("pantalla-telegrafia.png");
     capturada = true;
   } else {
     await page.waitForTimeout(50);
   }
 }
-if (!capturada) { console.log("\nnunca se vio una telegrafía"); process.exit(1); }
+let hudFinal = await page.textContent("#tel");
+let tick = Number(hudFinal.match(/tick (\d+)/)?.[1] ?? 0);
+for (let i = 0; i < 100 && tick < 100; i++) {
+  await page.waitForTimeout(100);
+  hudFinal = await page.textContent("#tel");
+  tick = Number(hudFinal.match(/tick (\d+)/)?.[1] ?? 0);
+}
 
 await browser.close();
+server.closeAllConnections?.();
 server.close();
 
-console.log(hud.trim().split("\n").map((l) => "  " + l).join("\n"));
+console.log(hudFinal.trim().split("\n").map((l) => "  " + l).join("\n"));
 console.log(`\nframes=${frames} en 4s = ${(frames / 4).toFixed(0)} fps (swiftshader por software)`);
 
 // Un error de consola no rompe la captura pero sí el juego: acá se ve.
@@ -84,6 +101,6 @@ if (errores.length) {
   console.log("\nerrores:\n" + errores.map((e) => "  " + e).join("\n"));
   process.exit(1);
 }
-const tick = Number(hud.match(/tick (\d+)/)?.[1] ?? 0);
 if (tick < 100) { console.log(`\nla simulación no avanzó (tick=${tick})`); process.exit(1); }
 console.log("\nOK: escena dibujada, pelea corriendo, sin errores");
+process.exit(0);

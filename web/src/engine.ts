@@ -41,6 +41,9 @@ const OFF_EVENTS = OFF_MINIONS + MAX_MINIONS * MINION_STRIDE;
 export const N_TOOLS = 5;
 /** El dash. No hace daño y no telegrafía: es la decisión defensiva del boss. */
 export const DASH = 4;
+/** Acciones del jugador, en el orden de `PlayerAction` de `types.rs`. Es el
+ *  `slot` del jugador mientras carga o golpea. */
+export const enum Accion { Ataque = 0, Esquiva = 1, Parry = 2, Habilidad = 3 }
 
 /** Fase de un actor, tal como la codifica el motor. */
 export const enum Fase { Idle = 0, Windup = 1, Active = 2, Recovery = 3, Dodging = 4 }
@@ -70,7 +73,7 @@ export interface Estado {
   terminado: boolean;
   jugador: Actor;
   boss: Actor;
-  proyectiles: { x: number; y: number }[];
+  proyectiles: { x: number; y: number; vx: number; vy: number }[];
   cajas: { x: number; y: number; hx: number; hy: number }[];
   minions: { x: number; y: number; vx: number; vy: number; radius: number; hp: number; kind: number; ttl: number }[];
   eventos: Evento[];
@@ -154,7 +157,7 @@ export class Motor {
     const proyectiles = [];
     for (let i = 0; i < nProj; i++) {
       const o = OFF_PROJ + i * PROJ_STRIDE;
-      proyectiles.push({ x: s[o], y: s[o + 1] });
+      proyectiles.push({ x: s[o], y: s[o + 1], vx: s[o + 2], vy: s[o + 3] });
     }
     const cajas = [];
     for (let i = 0; i < nDyn; i++) {

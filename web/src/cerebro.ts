@@ -60,8 +60,8 @@ export class Cerebro {
   private constructor(
     private contenedor: HTMLElement,
     cerebro: ArrayBuffer,
-    private offsets: Uint32Array,
-    private indices: Uint32Array,
+    private offsets?: Uint32Array,
+    private indices?: Uint32Array,
   ) {
     const n = new Uint32Array(cerebro, 0, 1)[0];
     const pos = new Float32Array(cerebro, 4, n * 3);
@@ -124,7 +124,9 @@ export class Cerebro {
       fetch("/cerebro.bin", { cache: "no-store" }),
       fetch(`/${pelea}.act`, { cache: "no-store" }),
     ]);
-    if (!c.ok || !a.ok) return null;
+    // Vite contesta un archivo que no existe con `index.html` y un 200.
+    const html = (r: Response) => r.headers.get("content-type")?.startsWith("text/html");
+    if (!c.ok || !a.ok || html(c) || html(a)) return null;
     const act = await a.arrayBuffer();
     const ticks = new Uint32Array(act, 0, 1)[0];
     const offsets = new Uint32Array(act, 4, ticks + 1);
@@ -132,8 +134,17 @@ export class Cerebro {
     return new Cerebro(contenedor, await c.arrayBuffer(), offsets, indices);
   }
 
+  /** Carga solo la geometría del conectoma para estimulación en vivo. */
+  static async cargarEnVivo(contenedor: HTMLElement): Promise<Cerebro | null> {
+    const c = await fetch("/cerebro.bin", { cache: "no-store" });
+    const html = (r: Response) => r.headers.get("content-type")?.startsWith("text/html");
+    if (!c.ok || html(c)) return null;
+    return new Cerebro(contenedor, await c.arrayBuffer());
+  }
+
   /** Aplica la actividad grabada hasta `tick` inclusive. */
   avanzar(tick: number): Lectura {
+    if (!this.offsets || !this.indices) return { disparos: 0, looming: 0, escape: false };
     const ultimoTick = this.offsets.length - 2;
     tick = Math.min(tick, ultimoTick);
     let lectura: Lectura = { disparos: 0, looming: 0, escape: false };
@@ -159,6 +170,47 @@ export class Cerebro {
       this.pintar();
     }
     return lectura;
+  }
+
+  /** Estimula en tiempo real para el modo interactivo de la Paradoja de la Mantis. */
+  estimularEnVivo(tick: number, looming: number, escape: boolean): Lectura {
+    let disparos = 0;
+    let loomCount = 0;
+
+    // Actividad basal tenue del resto del cerebro (~25 neuronas por tick)
+    const capaResto = this.capas[Grupo.Resto];
+    const nResto = capaResto.ultimo.length;
+    const nFondo = 15 + Math.floor(Math.random() * 15);
+    for (let k = 0; k < nFondo; k++) {
+      const idx = Math.floor(Math.random() * nResto);
+      capaResto.ultimo[idx] = tick;
+      disparos++;
+    }
+
+    // Looming en LC4 / LPLC2:
+    const capaLoom = this.capas[Grupo.Looming];
+    const nLoom = capaLoom.ultimo.length;
+    const fraccLoom = Math.min(1.0, looming / 2.5);
+    const nActivas = Math.floor(fraccLoom * nLoom * 0.8);
+    for (let k = 0; k < nActivas; k++) {
+      const idx = Math.floor(Math.random() * nLoom);
+      capaLoom.ultimo[idx] = tick;
+      disparos++;
+      loomCount++;
+    }
+
+    if (escape) {
+      this.fibraUltimo = tick;
+    }
+
+    this.tickVisto = tick;
+    this.pintar();
+
+    return {
+      disparos,
+      looming: loomCount,
+      escape,
+    };
   }
 
   /** Vuelve al tick cero: todo apagado, como al empezar la grabación. */

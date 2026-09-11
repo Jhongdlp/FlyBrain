@@ -48,30 +48,83 @@ EMPAREJAR = 0.75
 VENTANA_MS = 250.0
 
 
+def cruz(red, H, lado):
+    """Corrimiento medio, en columnas de MaleCNS, de las entradas T4/T5 de cada
+    subtipo (a-d) a las LPLC2 de un ojo, respecto de todas sus entradas T4/T5.
+
+    Cada LPLC2 recibe cada dirección de movimiento desde el brazo de su campo
+    receptivo donde un objeto que se expande se mueve en esa dirección (Klapoetke
+    et al., 2017): los cuatro corrimientos forman una cruz, y apuntan hacia donde
+    prefiere cada subtipo."""
+    de_lado = O._columnas(red)["lado"].to_numpy() == lado
+    lplc2 = np.flatnonzero((red.tipo == "LPLC2") & de_lado)
+    W = abs(red.W).tocsr()[lplc2]  # (LPLC2, pre)
+    con_col = ~np.isnan(H[:, 0])
+    Hc = np.nan_to_num(H)
+
+    def media(mascara):
+        Ws = W[:, np.flatnonzero(mascara & con_col)]
+        peso = np.asarray(Ws.sum(1)).ravel()
+        return (Ws @ Hc[mascara & con_col]) / np.maximum(peso, 1e-9)[:, None], peso
+
+    todas, _ = media(np.isin(red.tipo, [f"T{k}{s}" for k in "45" for s in "abcd"]) & de_lado)
+    d = []
+    for s in "abcd":
+        m, peso = media(np.isin(red.tipo, [f"T4{s}", f"T5{s}"]) & de_lado)
+        ok = peso > 0
+        d.append((m[ok] - todas[ok]).mean(0))
+    return np.array(d)
+
+
+def mapa(red, H, lado, cal):
+    """El giro (o espejo) que lleva la cruz de LPLC2 de un ojo a las direcciones
+    preferidas de T5a-d en `flyvis` (`cal`): Procrustes ortogonal. Devuelve el
+    mapa y cuánto se desvía cada brazo de la cruz, en grados."""
+    d = cruz(red, H, lado)
+    dn = d / np.linalg.norm(d, axis=1, keepdims=True)
+    u, _, vt = np.linalg.svd(cal.T @ dn)
+    M = u @ vt
+    llega = dn @ M.T
+    error = np.degrees(np.arccos(np.clip((llega * cal).sum(1), -1, 1)))
+    return M, error
+
+
 class Acople:
-    def __init__(self, red: R.Red):
+    def __init__(self, red: R.Red, lado: str = "R"):
+        """El acople de un ojo: `flyvis` le da al lóbulo óptico de ese `lado`.
+
+        Los dos ojos usan la misma grilla de `flyvis` (+x adelante, +y arriba):
+        el izquierdo se dibuja en espejo (`ojo_flyvis.retina_de`). El mapa del
+        derecho es el que se validó a mano (`mapa_malecns_flyvis.npy`); el del
+        izquierdo sale del mismo ajuste por la cruz de LPLC2, que reproduce el del
+        derecho (`chequear_mapas`)."""
         self.red = red
-        H, _ = O.columnas_derivadas(red)
-        lado = O._columnas(red)["lado"].to_numpy()
-        M = np.load(DATOS / "mapa_malecns_flyvis.npy")
+        self.ojo = lado
+        H, _ = O.columnas_derivadas(red, lado)
+        lados = O._columnas(red)["lado"].to_numpy()
         cal = np.load(DATOS / "flyvis_calibracion.npy")
         # El mapa se ajustó asumiendo esta calibración. Si flyvis cambiara la
         # orientación de su grilla, todo el acople quedaría girado sin avisar.
         assert np.allclose(cal, [(-1, 0), (1, 0), (0, 1), (0, -1)]), \
             f"la calibración de T5 cambió: {cal.tolist()}; rehacer el mapa"
+        if lado == "R":
+            M = np.load(DATOS / "mapa_malecns_flyvis.npy")
+        else:
+            M, error = mapa(red, H, lado, cal)
+            assert error.max() < 30, f"la cruz de LPLC2 del ojo {lado} no cierra: {error.round()}"
 
-        # El centro de la grilla de flyvis es el centro del ojo derecho de MaleCNS.
-        mi1 = (red.tipo == "Mi1") & (lado == "R") & ~np.isnan(H[:, 0])
+        # El centro de la grilla de flyvis es el centro del ojo de MaleCNS.
+        mi1 = (red.tipo == "Mi1") & (lados == lado) & ~np.isnan(H[:, 0])
         centro = np.median(H[mi1], axis=0)
         self.en_flyvis = (H - centro) @ M.T  # posición de cada neurona en la grilla de flyvis
-        self.lado = lado
+        self.lado = lados
         self.pares = None
 
     def emparejar(self, xy_por_tipo):
         """Para cada tipo: qué neurona de MaleCNS recibe de qué célula de flyvis."""
         self.pares = {}
         for t, xy in xy_por_tipo.items():
-            idx = np.flatnonzero((self.red.tipo == t) & (self.lado == "R")
+            idx = np.flatnonzero((self.red.tipo == t) & (self.lado == self.ojo)
                                  & ~np.isnan(self.en_flyvis[:, 0]))
             if not idx.size:
                 continue
@@ -86,8 +139,12 @@ class Acople:
     def fijas(self):
         return np.concatenate([i for i, _ in self.pares.values()])
 
-    def correr(self, respuesta, ganancia, semilla=0, dt_ojo=0.01):
-        """Corre el LIF con el ojo acoplado. `respuesta[t]` es `(cuadros, 721)`."""
+    def correr(self, respuesta, ganancia, semilla=0, dt_ojo=0.01, leer=None):
+        """Corre el LIF con el ojo acoplado. `respuesta[t]` es `(cuadros, 721)`.
+
+        `leer(disparos)` reduce cada cuadro antes de guardarlo: una pelea entera
+        sin reducir son 5 GB de disparos.
+        """
         sim = R.Simulador(self.red, R.Parametros(), semilla, fijas=self.fijas)
         cuadros = next(iter(respuesta.values())).shape[0]
         pasos_por_cuadro = int(round(dt_ojo * 1000 / sim.p.dt))
@@ -97,7 +154,8 @@ class Acople:
             ext[:] = 0.0
             for t, (i, j) in self.pares.items():
                 ext[i] = ganancia * np.maximum(respuesta[t][k, j], 0.0)
-            salida.append(sim.avanzar(pasos_por_cuadro * sim.p.dt, ext))
+            d = sim.avanzar(pasos_por_cuadro * sim.p.dt, ext)
+            salida.append(d if leer is None else leer(d))
         return np.concatenate(salida), sim.p
 
 

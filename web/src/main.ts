@@ -8,6 +8,7 @@
 
 import { EventKind, Evento, Fase, Lado, Motor } from "./engine";
 import { Cerebro } from "./cerebro";
+import { Ojo } from "./ojo";
 import { Render } from "./render";
 
 /** Paso fijo, el mismo que el motor. Nunca delta time variable. */
@@ -64,6 +65,9 @@ async function main() {
       agrandar.hidden = oculto;
     };
   }
+  const panelOjo = document.getElementById("ojo")!;
+  const ojo = await Ojo.cargar(panelOjo.querySelector("canvas")!, cual);
+  panelOjo.hidden = !ojo;
   const lectura = document.getElementById("lectura")!;
   const escape = document.getElementById("escape")!;
   let estado = motor.estado();
@@ -122,6 +126,8 @@ async function main() {
     if (deuda > DT_MS * MAX_ATRASO) deuda = 0;
 
     render.dibujar(estado, eventos);
+    // Lo que vio en el tick t es lo que decidió el tick t, como el cerebro.
+    ojo?.avanzar(estado.tick - 1);
     if (cerebro && !panel.classList.contains("oculto")) {
       // La actividad del tick t es la que decidió qué hacía el boss en ese
       // tick; el estado ya va por t+1 porque el paso se aplicó.

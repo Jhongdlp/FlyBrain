@@ -1,46 +1,71 @@
-// El boss es una mosca. Drosophila, procedural y low-poly: primitivas facetadas
-// animadas por pose, sin pipeline de assets, igual que el resto de la escena.
+// El boss es una mosca. Drosophila, procedural: primitivas animadas por pose,
+// sin pipeline de assets, igual que el resto de la escena.
 //
 // La cámara mira desde arriba a 60°, así que lo que manda es la silueta dorsal:
-// alas, tórax y los dos ojos compuestos. Las patas casi no se ven desde arriba,
+// alas, tórax y los dos ojos compuestos. Las patas se ven poco desde arriba,
 // pero dibujan la sombra, y la sombra es lo que dice "insecto" en el suelo.
 //
-// Todo acá es presentación: lee el `Actor` del motor y no decide nada.
+// **Camina.** El boss lo mueven las motoneuronas de las patas (`fly/patas.py`),
+// así que se dibuja caminando: apoyada en el suelo, en trípode como Drosophila,
+// con las alas plegadas y quietas. Solo despega en la esquiva, que es el salto
+// de escape de la fibra gigante.
+//
+// Todo acá es presentación: lee el `Actor` del motor y no decide nada. El paso
+// es cosmético —el motor no sabe de patas—, pero sale de cuánto avanzó el
+// cuerpo, así que los pies no patinan y un video de la misma pelea es idéntico.
 
 import * as THREE from "three";
 import { Actor, Fase } from "./engine";
+import { contorno, tinta } from "./tinta";
 
-// Mismo monocromo frío que la escena. Los ojos llevan el acento cian de las
-// armas y no el rojo de Drosophila: ese rojo está reservado para el peligro.
-const QUITINA = 0xd4dfe9;
-const BANDA = 0x566779;
-const PATA = 0x26323f;
-const OJO = 0x121d28;
-const OJO_BRILLO = 0x2fb4d8;
-const MEMBRANA = 0xcfe6f5;
-const VENA = 0x9fc4dc;
-const FANTASMA = 0x7fd8ff;
+// **Dirección de arte: una mosca de dibujo animado.** Cel-shading de tres
+// tonos y contorno negro (`tinta.ts`), con la anatomía que dice "mosca" y no
+// "abeja" desde la cámara a 60°: gris, con el tórax a rayas negras
+// longitudinales, el abdomen grande y redondo con bandas oscuras, ojos rojos
+// enormes que se comen la cabeza, alas celestes transparentes y la trompa con
+// su ventosa.
+//
+// Los ojos son rojos porque los de una mosca lo son, y sin ellos no es una
+// mosca. Carmesí oscuro y sin brillo propio, para no confundirse con el
+// rojo-naranja de las telegrafías, que sigue siendo el del peligro.
+const QUITINA = 0x8d949d;
+const RAYA = 0x363a42;
+const CABEZA = 0x9aa1aa;
+const ANILLO = 0xa7aeb7;
+const BANDA = 0x4a4f58;
+const PATA = 0x4e545d;
+const OJO = 0xc21f2b;
+const OJO_FACETA = 0x6e0d14;
+const CERDA = 0x15171b;
+const MEMBRANA = 0xb8e0ff;
+const VENA = 0xf4fbff;
+const FANTASMA = 0xdbe6f2;
+/** Radio del ojo compuesto, antes de achatarlo. */
+const R_OJO = 0.28;
+/** El destello al recibir un golpe: frames que dura. */
+const DESTELLO = 6;
 
 /** Largo del ala desde la bisagra. La envergadura sale mayor que el hitbox
  *  (0.9) a propósito: lo que golpea es el cuerpo, las alas son aire. */
 const ALA = 1.25;
 /** Semiamplitud del aleteo en el suelo de la pose, en radianes. */
 const ARCO = 1.0;
+/** Hacia dónde apunta el ala batiendo: el centro del abanico. */
+const BATE = -1.75;
 /** Frames de estela guardados y fantasmas dibujados con ellos. */
 const HISTORIA = 12;
 const FANTASMAS = 4;
 
-/** Contornos por inverted hull: malla duplicada, escalada, negra, BackSide. */
-export function contorno(malla: THREE.Mesh, grosor = 1.06): THREE.Mesh {
-  const m = new THREE.Mesh(
-    malla.geometry,
-    new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
-  );
-  m.name = "contorno";
-  m.scale.multiplyScalar(grosor);
-  malla.add(m);
-  return m;
-}
+/** Segmentos de la pata. El tarso apoya en el suelo inclinado `TARSO_CAE`. */
+const FEMUR = 0.4, TIBIA = 0.46, TARSO = 0.2, TARSO_CAE = 0.35;
+/** Altura del centro del cuerpo parada: las caderas quedan a ~0.3 del suelo y
+ *  las rodillas por encima de ellas, que es la silueta de insecto. */
+const DE_PIE = 0.55;
+/** Distancia que avanza el cuerpo en un ciclo de paso. A velocidad máxima
+ *  (4.5) son ~6 pasos por segundo. */
+const ZANCADA = 0.75;
+/** Cuánto levanta el pie en el vuelo del paso. */
+const ALZA = 0.14;
 
 /**
  * Una pose es un puñado de ángulos. Cada fase tiene la suya y el cuerpo la
@@ -56,42 +81,49 @@ interface Pose {
   barrido: number;
   /** Cuánto se levanta el plano del aleteo sobre el eje del cuerpo. */
   alzada: number;
-  /** Caída de cada par de patas (delantero, medio, trasero). */
+  /** En el aire: caída de cada par de patas (delantero, medio, trasero). */
   patas: [number, number, number];
   rodilla: number;
-  /** Altura extra del vuelo. Carga agachándose, esquiva saltando. */
+  /** En el suelo: cuánto levanta el pie cada par. Es la telegrafía del golpe. */
+  levanta: [number, number, number];
+  /** Altura sobre la de pie. Carga agachándose, esquiva saltando. */
   altura: number;
+  /** Squash & stretch: negativo se aplasta y ensancha, positivo se estira a
+   *  lo largo. Exagera la anticipación y el golpe, que es lo que los hace
+   *  legibles a la distancia de la cámara. */
+  estira: number;
 }
 
 /**
- * - **Carga**: pliega las alas en V sobre el abdomen, se echa atrás y levanta
- *   las patas delanteras. Desde arriba el abanico desaparece de golpe: es el
- *   cambio de silueta más grande que tiene, y por eso es la telegrafía.
+ * - **Reposo**: caminando, con las alas plegadas una sobre otra encima del
+ *   abdomen y quietas, como una Drosophila en el suelo.
+ * - **Carga**: abre las alas en V, se echa atrás y levanta las patas
+ *   delanteras. Desde arriba la silueta cambia de golpe: es la telegrafía.
  * - **Golpe**: abre las alas de un latigazo y se tira adelante.
  * - **Esquiva**: el escape de la fibra gigante tal como lo hace la mosca real —
- *   alas arriba, patas medias extendidas para el salto. Es la única acción que
- *   hoy maneja el conectoma, así que es la que tiene que verse mejor.
+ *   alas arriba, patas medias extendidas para el salto, y despega. Es la única
+ *   vez que está en el aire.
  */
 const POSE: Record<Fase, Pose> = {
   [Fase.Idle]: {
-    inclinacion: 0.05, aleteo: 1, barrido: -1.75, alzada: 0.15,
-    patas: [-0.3, -0.35, -0.45], rodilla: -1.9, altura: 0,
+    inclinacion: 0.04, aleteo: 0, barrido: -3.2, alzada: 0.06,
+    patas: [-0.3, -0.35, -0.45], rodilla: -1.9, levanta: [0, 0, 0], altura: 0, estira: 0,
   },
   [Fase.Windup]: {
-    inclinacion: -0.3, aleteo: 0, barrido: -2.8, alzada: 0.05,
-    patas: [0.35, -0.45, -0.6], rodilla: -0.6, altura: -0.1,
+    inclinacion: -0.25, aleteo: 0, barrido: -2.5, alzada: 0.12,
+    patas: [0.35, -0.45, -0.6], rodilla: -0.6, levanta: [0.45, 0, 0], altura: -0.08, estira: -0.14,
   },
   [Fase.Active]: {
-    inclinacion: 0.5, aleteo: 1.2, barrido: -1.4, alzada: 0.3,
-    patas: [0.1, -0.5, -0.5], rodilla: -0.45, altura: 0.05,
+    inclinacion: 0.3, aleteo: 1.2, barrido: -1.4, alzada: 0.3,
+    patas: [0.1, -0.5, -0.5], rodilla: -0.45, levanta: [0.2, 0, 0], altura: 0.04, estira: 0.2,
   },
   [Fase.Recovery]: {
-    inclinacion: 0.15, aleteo: 0.8, barrido: -1.85, alzada: 0.1,
-    patas: [-0.3, -0.4, -0.5], rodilla: -1.7, altura: -0.05,
+    inclinacion: 0.08, aleteo: 0, barrido: -3.2, alzada: 0.06,
+    patas: [-0.3, -0.4, -0.5], rodilla: -1.7, levanta: [0, 0, 0], altura: -0.03, estira: -0.05,
   },
   [Fase.Dodging]: {
-    inclinacion: 0.2, aleteo: 0.35, barrido: -2.0, alzada: 1.15,
-    patas: [-0.6, -1.3, -0.85], rodilla: -0.2, altura: 0.25,
+    inclinacion: 0.2, aleteo: 1, barrido: -2.0, alzada: 1.15,
+    patas: [-0.6, -1.3, -0.85], rodilla: -0.2, levanta: [0, 0, 0], altura: 0.8, estira: 0.12,
   },
 };
 
@@ -101,37 +133,57 @@ const LERP = 0.28;
  *  200Hz, y sale del tick, así que un video de la misma pelea es idéntico. */
 const ESTROBO = 2.39996;
 
-const mat = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) =>
-  new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.6, ...extra });
-
 /** Segmento de pata a lo largo de +X local, con su origen en la articulación. */
-function segmento(largo: number, r0: number, r1: number): THREE.BufferGeometry {
+export function segmento(largo: number, r0: number, r1: number): THREE.BufferGeometry {
   const g = new THREE.CylinderGeometry(r1, r0, largo, 5);
   g.rotateZ(-Math.PI / 2);
   g.translate(largo / 2, 0, 0);
   return g;
 }
 
+/** Ángulos de una pata para que el tarso apoye en `pie`, los dos en el marco
+ *  del lado: `[abre, fémur, rodilla, tobillo]`, en el orden de las rotaciones
+ *  de `cadera` (YZX) y de las articulaciones hijas. Dos segmentos con la
+ *  rodilla arriba; el tarso cae fijo `cae` hacia afuera. Los largos son los de
+ *  la mosca salvo que se pasen otros: la araña (`jugador.ts`) usa esta misma. */
+export function alcanzar(
+  cadera: THREE.Vector3, pie: THREE.Vector3,
+  [F, T, TA, cae]: readonly number[] = [FEMUR, TIBIA, TARSO, TARSO_CAE],
+): [number, number, number, number] {
+  const dx = pie.x - cadera.x, dz = pie.z - cadera.z;
+  // Hasta el tobillo: el tarso ocupa el último tramo, hacia afuera y abajo.
+  const r = Math.hypot(dx, dz) - TA * Math.cos(cae);
+  const h = pie.y + TA * Math.sin(cae) - cadera.y;
+  const d = Math.max(Math.min(Math.hypot(r, h), (F + T) * 0.999), Math.abs(F - T) + 1e-3);
+  const cadera_ = Math.acos((F * F + d * d - T * T) / (2 * F * d));
+  const rodilla = Math.acos((F * F + T * T - d * d) / (2 * F * T));
+  const femur = Math.atan2(h, r) + cadera_;
+  const flexion = rodilla - Math.PI;
+  return [Math.atan2(-dz, dx), femur, flexion, -cae - femur - flexion];
+}
+
 /** Abdomen de revolución, apuntando a -X, con los terguitos marcados: una
  *  cintura en cada borde de segmento y la banda oscura detrás de cada uno, que
  *  es el dibujo de Drosophila. El color va por vértice para que sea una malla. */
 function abdomen(): THREE.BufferGeometry {
-  const L = 0.9, R = 0.3, SEG = 6;
+  // Más redondo y más gordo que el de Drosophila: la panza es la mitad de la
+  // silueta de una mosca de dibujo animado.
+  const L = 0.85, R = 0.37, SEG = 5;
   const perfil: THREE.Vector2[] = [];
   for (let i = 0; i <= 36; i++) {
     const s = i / 36;
     const cintura = Math.pow(Math.cos(Math.PI * s * SEG), 16);
-    const r = R * Math.pow(Math.sin(Math.PI * (0.15 + 0.85 * s)), 0.8) * (1 - 0.09 * cintura);
+    const r = R * Math.pow(Math.sin(Math.PI * (0.1 + 0.9 * s)), 0.55) * (1 - 0.07 * cintura);
     perfil.push(new THREE.Vector2(Math.max(r, 0.001), s * L));
   }
-  const g = new THREE.LatheGeometry(perfil, 10);
+  const g = new THREE.LatheGeometry(perfil, 18);
   const uv = g.getAttribute("uv");
-  const claro = new THREE.Color(QUITINA), oscuro = new THREE.Color(BANDA), c = new THREE.Color();
+  const claro = new THREE.Color(ANILLO), oscuro = new THREE.Color(BANDA), c = new THREE.Color();
   const colores: number[] = [];
   for (let i = 0; i < uv.count; i++) {
     const s = uv.getY(i);
     const t = (s * SEG) % 1;
-    c.copy(claro).lerp(oscuro, t > 0.55 || s > 0.85 ? 1 : 0);
+    c.copy(claro).lerp(oscuro, t > 0.5 || s > 0.9 ? 1 : 0);
     colores.push(c.r, c.g, c.b);
   }
   g.setAttribute("color", new THREE.Float32BufferAttribute(colores, 3));
@@ -144,7 +196,7 @@ function abdomen(): THREE.BufferGeometry {
  *  es más denso: bordes marcados y el centro casi transparente. Nace un poco
  *  afuera de la bisagra para no ensuciar el tórax. Alfa por vértice. */
 function abanico(): THREE.BufferGeometry {
-  const t0 = POSE[Fase.Idle].barrido - ARCO;
+  const t0 = BATE - ARCO;
   const g = new THREE.RingGeometry(0.3, ALA, 24, 2, t0, ARCO * 2);
   const pos = g.getAttribute("position");
   const rgba: number[] = [];
@@ -184,11 +236,6 @@ function venas(): THREE.BufferGeometry {
     [0.72, -0.1, 0.74, -0.18],  // travesaño posterior
   ];
   const puntos = tramos.flatMap(([a, b, c, d]) => [v(a, b), v(c, d)]);
-  const borde = formaAla().getPoints(12);
-  for (let i = 0; i < borde.length; i++) {
-    const p = borde[i], q = borde[(i + 1) % borde.length];
-    puntos.push(v(p.x, p.y), v(q.x, q.y));
-  }
   return new THREE.BufferGeometry().setFromPoints(puntos);
 }
 
@@ -202,7 +249,18 @@ interface Lado {
   abanico: THREE.MeshBasicMaterial;
   caderas: THREE.Group[];
   rodillas: THREE.Group[];
+  tobillos: THREE.Group[];
 }
+
+/** Las tres patas de un lado, en el marco del lado (+z hacia afuera): dónde
+ *  está la cadera en el tórax, hacia dónde abre en el aire, y dónde apoya el
+ *  pie parada, relativo a la cadera. Delanteras adelante, medias al costado,
+ *  traseras atrás: la huella de Drosophila. */
+const PATAS: { cadera: THREE.Vector3; abre: number; pie: THREE.Vector3 }[] = [
+  { cadera: new THREE.Vector3(0.26, -0.17, 0.1), abre: -0.7, pie: new THREE.Vector3(0.58, 0, 0.55) },
+  { cadera: new THREE.Vector3(0.08, -0.21, 0.12), abre: -1.6, pie: new THREE.Vector3(0.04, 0, 0.82) },
+  { cadera: new THREE.Vector3(-0.1, -0.19, 0.1), abre: -2.4, pie: new THREE.Vector3(-0.62, 0, 0.6) },
+];
 
 export class Mosca {
   /** Posición y rumbo. Las armas del boss cuelgan de acá. */
@@ -210,8 +268,18 @@ export class Mosca {
   /** Cabeceo, alabeo y vaivén: la animación, separada del rumbo para que
    *  inclinarse no cambie hacia dónde mira. */
   private cuerpo = new THREE.Group();
+  /** Cabeza, tórax y abdomen: lo que se aplasta y se estira. Las patas y las
+   *  alas quedan fuera para que los pies no patinen al deformarse. */
+  private tronco = new THREE.Group();
+  private panza: THREE.Mesh;
+  private antenas: THREE.Group[] = [];
   private lados: Lado[] = [];
-  private ojos: THREE.MeshStandardMaterial;
+  private ojos: THREE.MeshToonMaterial;
+  /** El brillo de cada ojo, que mira siempre a la cámara. Ver `mirar`. */
+  private reflejos: { ojo: THREE.Mesh; reflejo: THREE.Mesh }[] = [];
+  /** Los materiales que se ponen blancos al recibir un golpe. */
+  private piel: THREE.MeshToonMaterial[] = [];
+  private destello = 0;
 
   private p: Pose = structuredClone(POSE[Fase.Idle]);
   private alabeo = 0;
@@ -223,66 +291,169 @@ export class Mosca {
   /** 1 mientras esquiva, y se apaga en unos frames después. */
   private rastro = 0;
 
-  constructor(escena: THREE.Scene) {
-    const quitina = mat(QUITINA);
+  /** 1 con las patas en el suelo, 0 en el aire (la esquiva). Mezcla la pata
+   *  que apoya con la pose de vuelo, así despegar y aterrizar no saltan. */
+  private suelo = 0;
+  /** Fase del paso, de 0 a 1, y cuánto está caminando (0 quieta, 1 a tope):
+   *  quieta, los pies vuelven a su lugar en vez de congelarse a medio paso. */
+  private paso = 0;
+  private marcha = 0;
+  private antes: { x: number; y: number; f: number } | null = null;
+  private pie = new THREE.Vector3();
+  private vuelta = new THREE.Quaternion();
+  private aCamara = new THREE.Vector3();
+  private luz = new THREE.Vector3();
+  private derecha = new THREE.Vector3();
+  private traspuesta = new THREE.Matrix3();
 
-    const torax = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 7), quitina);
+  constructor(escena: THREE.Scene, private camara: THREE.Camera) {
+    // Esferas suaves y no facetadas: con cel-shading, las bandas de luz
+    // dibujan la forma, y las facetas las rompían en astillas.
+    const cara = tinta(CABEZA, { emissive: 0xffffff, emissiveIntensity: 0 });
+    const rayado = tinta(0xffffff, { vertexColors: true, emissive: 0xffffff, emissiveIntensity: 0 });
+
+    // El tórax, con las cuatro rayas negras longitudinales de la mosca
+    // doméstica: desde arriba es lo más reconocible que tiene después de los
+    // ojos. Van por vértice, así el tórax sigue siendo una sola malla.
+    const geoTorax = new THREE.SphereGeometry(0.36, 32, 20);
+    const pt = geoTorax.getAttribute("position");
+    const gris = new THREE.Color(QUITINA), negro = new THREE.Color(RAYA);
+    const colTorax: number[] = [];
+    for (let i = 0; i < pt.count; i++) {
+      const x = pt.getX(i) / 0.36, y = pt.getY(i) / 0.36, z = Math.abs(pt.getZ(i) / 0.36);
+      const raya = y > 0.15 && x > -0.75 && ((z > 0.07 && z < 0.2) || (z > 0.36 && z < 0.5));
+      const c = raya ? negro : gris;
+      colTorax.push(c.r, c.g, c.b);
+    }
+    geoTorax.setAttribute("color", new THREE.Float32BufferAttribute(colTorax, 3));
+    const torax = new THREE.Mesh(geoTorax, rayado);
     torax.scale.set(1.1, 0.88, 0.95);
     torax.position.x = 0.1;
 
-    const cabeza = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 7), quitina);
-    cabeza.scale.set(0.7, 0.9, 1.15);
+    // La cabeza es chica: los ojos se la comen casi entera.
+    const cabeza = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 16), cara);
+    cabeza.scale.set(0.75, 0.92, 1.1);
     cabeza.position.set(0.52, 0.03, 0);
 
-    const panza = new THREE.Mesh(abdomen(), mat(0xffffff, { vertexColors: true }));
-    panza.position.set(-0.18, -0.02, 0);
-    panza.rotation.z = 0.12; // cuelga un poco, como en vuelo
+    this.panza = new THREE.Mesh(abdomen(), tinta(0xffffff, {
+      vertexColors: true, emissive: 0xffffff, emissiveIntensity: 0,
+    }));
+    this.panza.position.set(-0.16, -0.02, 0);
+    this.panza.rotation.z = 0.08; // cuelga un poco
+    this.piel.push(cara, rayado, this.panza.material as THREE.MeshToonMaterial);
 
-    // Los ojos compuestos son la mitad de la cabeza y el órgano con el que la
-    // mosca ve venir el golpe: la señal de looming entra por acá. Icosaedro
-    // facetado, cada cara un grupo de omatidios. Se encienden al esquivar.
-    this.ojos = mat(OJO, {
-      roughness: 0.2, metalness: 0.2, emissive: OJO_BRILLO, emissiveIntensity: 0.5,
-    });
-    const geoOjo = new THREE.IcosahedronGeometry(0.2, 1);
+    // Los ojos compuestos: rojos, enormes, facetados. Cada faceta es un grupo
+    // de omatidios y con tres tonos titilan al girar; las aristas en rojo
+    // oscuro son la grilla del ojo de mosca. Es el órgano con el que ve venir
+    // el golpe —la señal de looming entra por acá— y se aviva al esquivar.
+    this.ojos = tinta(OJO, { emissive: 0xff6b5a, emissiveIntensity: 0 });
+    // El toon no tiene `flatShading`: las facetas salen de la geometría. El
+    // icosaedro no está indexado, así que recalcular normales las deja planas.
+    const geoOjo = new THREE.IcosahedronGeometry(R_OJO, 2);
+    geoOjo.computeVertexNormals();
+    const geoFacetas = new THREE.EdgesGeometry(geoOjo, 1);
+    const facetas = new THREE.LineBasicMaterial({ color: OJO_FACETA, transparent: true, opacity: 0.55 });
+    const geoReflejo = new THREE.SphereGeometry(0.045, 10, 8);
+    const blanco = new THREE.MeshBasicMaterial({ color: 0xffffff });
     for (const z of [-1, 1]) {
       const ojo = new THREE.Mesh(geoOjo, this.ojos);
-      ojo.scale.set(0.75, 1, 0.78);
-      ojo.position.set(0.56, 0.05, z * 0.17);
+      ojo.scale.set(0.78, 1, 0.82);
+      ojo.position.set(0.58, 0.07, z * 0.18);
       ojo.castShadow = true;
-      contorno(ojo, 1.08);
-      this.cuerpo.add(ojo);
+      contorno(ojo, 1.07);
+      const grilla = new THREE.LineSegments(geoFacetas, facetas);
+      grilla.scale.setScalar(1.005);
+      const reflejo = new THREE.Mesh(geoReflejo, blanco);
+      ojo.add(grilla, reflejo);
+      this.tronco.add(ojo);
+      this.reflejos.push({ ojo, reflejo });
     }
 
-    for (const m of [torax, cabeza, panza]) {
+    for (const m of [torax, cabeza, this.panza]) {
       m.castShadow = true;
       contorno(m);
-      this.cuerpo.add(m);
+      this.tronco.add(m);
     }
 
+    // La trompa: el tubo que baja de la cabeza y termina en la ventosa con la
+    // que la mosca chupa. En el dibujo de una mosca es tan de ella como los
+    // ojos.
+    const trompa = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.26, 10), cara);
+    trompa.position.set(0.63, -0.18, 0);
+    trompa.rotation.z = 0.5;
+    const ventosa = new THREE.Mesh(new THREE.SphereGeometry(0.075, 14, 10), cara);
+    ventosa.scale.set(1.2, 0.55, 1.5);
+    ventosa.position.set(0.7, -0.3, 0);
+    for (const m of [trompa, ventosa]) {
+      m.castShadow = true;
+      contorno(m, 1.15);
+      this.tronco.add(m);
+    }
+
+    // Las macroquetas: las cerdas negras del dorso, en pares, y unas pocas en
+    // la punta del abdomen. Trazos de tinta, del mismo negro que el contorno.
+    const geoCerda = new THREE.ConeGeometry(0.02, 0.24, 4).translate(0, 0.12, 0);
+    const tintaCerda = new THREE.MeshBasicMaterial({ color: CERDA });
+    for (const [dx, dz] of [[0.18, 0.12], [0.0, 0.17], [-0.16, 0.11], [-0.28, 0.05]]) {
+      const y = 0.317 * Math.sqrt(1 - (dx / 0.396) ** 2 - (dz / 0.342) ** 2) * 0.94;
+      for (const s of [-1, 1]) {
+        const cerda = new THREE.Mesh(geoCerda, tintaCerda);
+        cerda.position.set(0.1 + dx, y, dz * s);
+        cerda.rotation.set(0.35 * s, 0, 1.05); // hacia atrás y un poco afuera
+        this.tronco.add(cerda);
+      }
+    }
+    for (const [x, y, z] of [[-0.85, 0.18, 0.1], [-0.9, 0.15, -0.08], [-0.95, 0.08, 0.02]]) {
+      const cerda = new THREE.Mesh(geoCerda, tintaCerda);
+      cerda.position.set(x, y, z);
+      cerda.rotation.set(z * 3, 0, 1.3);
+      this.tronco.add(cerda);
+    }
+
+    // Las antenas: un botón gris con la arista, la pluma negra. No hacen nada
+    // en el motor, pero tiemblan, y es lo que la hace parecer atenta.
+    const geoBoton = new THREE.SphereGeometry(0.045, 10, 8);
+    const geoArista = new THREE.ConeGeometry(0.013, 0.2, 4).translate(0, 0.1, 0);
+    for (const s of [-1, 1]) {
+      const antena = new THREE.Group();
+      antena.position.set(0.67, 0.12, 0.05 * s);
+      const boton = new THREE.Mesh(geoBoton, cara);
+      contorno(boton, 1.25);
+      const arista = new THREE.Mesh(geoArista, tintaCerda);
+      arista.rotation.set(0.7 * s, 0, -0.6); // arriba, adelante y afuera
+      antena.add(boton, arista);
+      this.tronco.add(antena);
+      this.antenas.push(antena);
+    }
+    this.cuerpo.add(this.tronco);
+
+    // Alas de dibujo animado: celeste transparente, venas blancas y el borde
+    // en tinta oscura, que es lo que las recorta contra el mantel. Sin
+    // sombra: una membrana transparente proyectaría una sombra opaca.
     const geoAla = new THREE.ShapeGeometry(formaAla(), 6).rotateX(-Math.PI / 2);
     const geoVenas = venas().rotateX(-Math.PI / 2);
-    // Membrana iridiscente: las alas de mosca hacen interferencia de capa fina
-    // de verdad. Sin sombra: una membrana transparente proyectaría una sombra
-    // opaca, y la sombra del cuerpo ya dice todo lo que hace falta.
-    const membrana = new THREE.MeshPhysicalMaterial({
-      color: MEMBRANA, transparent: true, opacity: 0.32, roughness: 0.25,
-      iridescence: 1, iridescenceIOR: 1.35, iridescenceThicknessRange: [180, 520],
-      side: THREE.DoubleSide, depthWrite: false,
+    const geoBorde = new THREE.BufferGeometry()
+      .setFromPoints(formaAla().getPoints(12).map((p) => new THREE.Vector3(p.x, 0, -p.y)));
+    const membrana = new THREE.MeshBasicMaterial({
+      color: MEMBRANA, transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false,
     });
-    const vena = new THREE.LineBasicMaterial({ color: VENA, transparent: true, opacity: 0.75 });
+    const vena = new THREE.LineBasicMaterial({ color: VENA, transparent: true, opacity: 0.85 });
+    const bordeAla = new THREE.LineBasicMaterial({ color: 0x1f2a36 });
     const geoAbanico = abanico();
 
-    const pata = mat(PATA, { roughness: 0.8 });
-    const femur = segmento(0.36, 0.035, 0.03);
-    const tibia = segmento(0.42, 0.028, 0.02);
-    const tarso = segmento(0.2, 0.018, 0.01);
-    const caderas: [number, number, number, number][] = [
-      // x, y, z de la cadera en el tórax, y hacia dónde abre la pata
-      [0.26, -0.17, 0.1, -0.7],
-      [0.08, -0.21, 0.12, -1.6],
-      [-0.1, -0.19, 0.1, -2.4],
-    ];
+    const pata = tinta(PATA, { emissive: 0xffffff, emissiveIntensity: 0 });
+    this.piel.push(pata);
+    // Un segmento y su contorno. El inverted hull de `contorno` escala desde el
+    // origen, que en una pata es la articulación: la alargaría. Acá el casco es
+    // el mismo cilindro, más grueso y un pelo más largo por los dos extremos.
+    const tinta0 = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide });
+    const hueso = (largo: number, r0: number, r1: number) => {
+      const casco = segmento(largo + 0.03, r0 + 0.018, r1 + 0.018).translate(-0.015, 0, 0);
+      return [segmento(largo, r0, r1), casco] as const;
+    };
+    const femur = hueso(FEMUR, 0.065, 0.05);
+    const tibia = hueso(TIBIA, 0.046, 0.032);
+    const tarso = hueso(TARSO, 0.03, 0.018);
 
     for (const signo of [1, -1]) {
       const lado = new THREE.Group();
@@ -293,7 +464,8 @@ export class Mosca {
       plano.position.set(0.12, 0.25, 0.12);
       const barrido = new THREE.Group();
       const ala = new THREE.Group();
-      ala.add(new THREE.Mesh(geoAla, membrana), new THREE.LineSegments(geoVenas, vena));
+      ala.add(new THREE.Mesh(geoAla, membrana), new THREE.LineSegments(geoVenas, vena),
+        new THREE.LineLoop(geoBorde, bordeAla));
       barrido.add(ala);
       // El ala de verdad bate a 200Hz; a 60fps se ve un abanico borroso con el
       // ala congelada en un punto distinto cada frame. Se dibujan las dos cosas.
@@ -306,31 +478,32 @@ export class Mosca {
       plano.add(disco, barrido);
       lado.add(plano);
 
-      const cs: THREE.Group[] = [], rs: THREE.Group[] = [];
-      for (const [x, y, z, abre] of caderas) {
+      const cs: THREE.Group[] = [], rs: THREE.Group[] = [], ts: THREE.Group[] = [];
+      for (const { cadera: c } of PATAS) {
         const cadera = new THREE.Group();
-        cadera.position.set(x, y, z);
+        cadera.position.copy(c);
         cadera.rotation.order = "YZX"; // primero abre, después cae
-        cadera.rotation.y = abre;
         const rodilla = new THREE.Group();
-        rodilla.position.x = 0.36;
+        rodilla.position.x = FEMUR;
         const tobillo = new THREE.Group();
-        tobillo.position.x = 0.42;
-        tobillo.rotation.z = 0.5; // el tarso abre hacia afuera
-        for (const [g, geo] of [[cadera, femur], [rodilla, tibia], [tobillo, tarso]] as const) {
+        tobillo.position.x = TIBIA;
+        for (const [g, [geo, casco]] of [[cadera, femur], [rodilla, tibia], [tobillo, tarso]] as const) {
           const m = new THREE.Mesh(geo, pata);
           m.castShadow = true;
-          g.add(m);
+          const borde = new THREE.Mesh(casco, tinta0);
+          borde.name = "contorno";
+          g.add(m, borde);
         }
         rodilla.add(tobillo);
         cadera.add(rodilla);
         lado.add(cadera);
         cs.push(cadera);
         rs.push(rodilla);
+        ts.push(tobillo);
       }
 
       this.cuerpo.add(lado);
-      this.lados.push({ plano, barrido, ala, abanico, caderas: cs, rodillas: rs });
+      this.lados.push({ plano, barrido, ala, abanico, caderas: cs, rodillas: rs, tobillos: ts });
     }
 
     this.grupo.add(this.cuerpo);
@@ -339,7 +512,7 @@ export class Mosca {
     // Los fantasmas son copias de la mosca congelada en la pose de esquiva, así
     // que la estela ya tiene la silueta del escape y no hay que animarla.
     this.p = structuredClone(POSE[Fase.Dodging]);
-    this.posar(0, 0);
+    this.posar(0, 0, DE_PIE);
     for (let i = 0; i < FANTASMAS; i++) {
       const f = this.cuerpo.clone();
       const m = new THREE.MeshBasicMaterial({
@@ -359,53 +532,150 @@ export class Mosca {
       this.fantasmas.push({ o: f, m });
     }
     this.p = structuredClone(POSE[Fase.Idle]);
+    this.suelo = 1;
   }
 
-  /** Aplica la pose actual. `fase` es la del aleteo, de 0 a 2π. */
-  private posar(fase: number, tick: number) {
+  /** Aplica la pose actual. `fase` es la del aleteo, de 0 a 2π; `alto`, a
+   *  cuánto del suelo está el centro del cuerpo. */
+  private posar(fase: number, tick: number, alto: number) {
     const p = this.p;
     const bate = p.aleteo * ARCO;
-    for (const l of this.lados) {
+    // Las patas apoyan en el suelo del mundo, no en el del cuerpo: si el
+    // cuerpo cabecea, los pies se quedan donde están. Por eso el pie se lleva
+    // al marco del lado deshaciendo la rotación de `cuerpo`.
+    this.vuelta.copy(this.cuerpo.quaternion).invert();
+    this.lados.forEach((l, k) => {
       l.plano.rotation.x = -p.alzada;
       l.barrido.rotation.y = p.barrido + bate * Math.sin(fase);
       // En cada extremo del golpe el ala se da vuelta. Desde arriba se ve como
       // un ala que se afina y se ensancha, que es lo que la hace parecer viva.
       l.ala.rotation.x = 0.9 * Math.cos(fase) * Math.min(p.aleteo, 1);
       l.abanico.opacity = 0.35 * Math.min(p.aleteo, 1);
-      l.caderas.forEach((c, i) => {
-        // Las patas cuelgan y se mecen apenas, desfasadas entre pares.
-        c.rotation.z = p.patas[i] + 0.06 * Math.sin(tick * 0.09 + i * 1.7);
+
+      const signo = k === 0 ? 1 : -1;
+      PATAS.forEach(({ cadera, abre, pie }, i) => {
+        // En el aire: la pose, con las patas meciéndose apenas.
+        const aire = [abre, p.patas[i] + 0.06 * Math.sin(tick * 0.09 + i * 1.7), p.rodilla, 0.5];
+        // En el suelo: trípode. Delantera y trasera de un lado pisan con la
+        // media del otro; los dos trípodes, a contrafase.
+        const s = (this.paso + ((i + k) % 2) * 0.5) % 1;
+        const apoyo = s < 0.5;
+        const u = apoyo ? s * 2 : (s - 0.5) * 2;
+        // Apoyado, el pie va hacia atrás lo mismo que avanza el cuerpo; en el
+        // vuelo vuelve adelante, levantado.
+        const ida = apoyo ? 0.5 - u : u * u * (3 - 2 * u) - 0.5;
+        const alza = (apoyo ? 0 : ALZA * Math.sin(Math.PI * u)) * this.marcha;
+        let froteX = 0, froteY = 0, froteZ = 0;
+        if (this.marcha < 0.05 && i === 0 && this.suelo > 0.8) {
+          const faseGroom = tick % 280;
+          if (faseGroom < 80) {
+            froteY = 0.05 + 0.015 * Math.sin(tick * 0.3);
+            froteX = 0.04 * Math.sin(tick * 0.7 * signo);
+            froteZ = -0.07 * signo;
+          }
+        }
+        this.pie.set(
+          cadera.x + pie.x + ida * (ZANCADA / 2) * this.marcha + froteX,
+          -alto + alza + p.levanta[i] + froteY,
+          (cadera.z + pie.z) * signo + froteZ,
+        ).applyQuaternion(this.vuelta);
+        this.pie.z *= signo;
+        const tierra = alcanzar(cadera, this.pie);
+
+        const w = this.suelo;
+        const [y, z, r, t] = aire.map((v, j) => v + (tierra[j] - v) * w);
+        l.caderas[i].rotation.y = y;
+        l.caderas[i].rotation.z = z;
+        l.rodillas[i].rotation.z = r;
+        l.tobillos[i].rotation.z = t;
       });
-      for (const r of l.rodillas) r.rotation.z = p.rodilla;
+    });
+  }
+
+  /** El jugador le acertó. Lo llama el render al ver el evento del motor. */
+  golpeada() {
+    this.destello = DESTELLO;
+  }
+
+  /** El brillo de los ojos: un punto blanco que busca siempre la cámara,
+   *  arriba a la izquierda, de donde viene la luz. Es lo que los hace de
+   *  vidrio y no de goma. */
+  private mirar() {
+    const c = this.camara.getWorldDirection(this.aCamara).negate();
+    this.luz.setFromMatrixColumn(this.camara.matrixWorld, 1)
+      .sub(this.derecha.setFromMatrixColumn(this.camara.matrixWorld, 0))
+      .multiplyScalar(0.45).add(c);
+    for (const { ojo, reflejo } of this.reflejos) {
+      // La normal del ojo que en el mundo apunta a `luz` es Mᵀ·luz: las
+      // normales se transforman con la inversa traspuesta, y esto la deshace.
+      this.traspuesta.setFromMatrix4(ojo.matrixWorld).transpose();
+      reflejo.position.copy(this.luz).applyMatrix3(this.traspuesta).setLength(R_OJO * 0.93);
     }
   }
 
   actualizar(a: Actor, altura: number, tick: number) {
     const objetivo = POSE[a.fase];
     const p = this.p;
-    for (const k of ["inclinacion", "aleteo", "barrido", "alzada", "rodilla", "altura"] as const) {
+    for (const k of ["inclinacion", "aleteo", "barrido", "alzada", "rodilla", "altura", "estira"] as const) {
       p[k] += (objetivo[k] - p[k]) * LERP;
     }
-    for (let i = 0; i < 3; i++) p.patas[i] += (objetivo.patas[i] - p.patas[i]) * LERP;
+    for (let i = 0; i < 3; i++) {
+      p.patas[i] += (objetivo.patas[i] - p.patas[i]) * LERP;
+      p.levanta[i] += (objetivo.levanta[i] - p.levanta[i]) * LERP;
+    }
+    const enElAire = a.fase === Fase.Dodging;
+    this.suelo += ((enElAire ? 0 : 1) - this.suelo) * (enElAire ? 0.5 : 0.2);
 
-    // Se inclina hacia donde va, como un helicóptero: el empuje de las alas
-    // apunta a la velocidad. Sale de la velocidad del motor, no se inventa.
+    // El paso avanza con lo que avanzó el cuerpo, más un poco por girar en el
+    // lugar: una mosca que rota también da pasos.
     const s = Math.sin(a.facing), c = Math.cos(a.facing);
+    if (this.antes) {
+      const avance = Math.abs((a.x - this.antes.x) * c + (a.y - this.antes.y) * s);
+      const giro = Math.abs(Math.atan2(Math.sin(a.facing - this.antes.f), Math.cos(a.facing - this.antes.f)));
+      // Un salto de posición (la pelea reinicia) no es caminar.
+      if (avance < 1) this.paso = (this.paso + (avance + giro * 0.5) / ZANCADA) % 1;
+    }
+    this.antes = { x: a.x, y: a.y, f: a.facing };
+    const rapidez = Math.min(Math.hypot(a.vx, a.vy) / 4.5, 1);
+    this.marcha += (rapidez - this.marcha) * 0.2;
+
+    // En el aire se inclina hacia donde va, como un helicóptero: el empuje de
+    // las alas apunta a la velocidad. En el suelo camina derecha.
     const adelante = a.vx * c + a.vy * s;
     const costado = -a.vx * s + a.vy * c;
     const lim = (v: number, m: number) => Math.max(-m, Math.min(m, v));
-    this.cabeceo += (lim(adelante * 0.05, 0.4) - this.cabeceo) * 0.15;
-    this.alabeo += (lim(costado * 0.08, 0.6) - this.alabeo) * 0.15;
+    const vuelo = 1 - this.suelo;
+    this.cabeceo += (lim(adelante * 0.05, 0.4) * vuelo - this.cabeceo) * 0.15;
+    this.alabeo += (lim(costado * 0.08, 0.6) * vuelo - this.alabeo) * 0.15;
 
-    const h = altura + p.altura + 0.05 * Math.sin(tick * 0.13);
+    const alto = DE_PIE + p.altura + vuelo * 0.05 * Math.sin(tick * 0.13);
+    const h = altura + alto;
     this.grupo.position.set(a.x, h, a.y);
     this.grupo.rotation.y = -a.facing;
     this.cuerpo.rotation.set(this.alabeo, 0, -(p.inclinacion + this.cabeceo));
-    this.posar(tick * ESTROBO, tick);
+    this.posar(tick * ESTROBO, tick, alto);
 
     const esquiva = a.fase === Fase.Dodging;
-    this.brillo += ((esquiva ? 2.4 : 0.5) - this.brillo) * (esquiva ? 0.5 : 0.08);
+    this.brillo += ((esquiva ? 0.7 : 0) - this.brillo) * (esquiva ? 0.5 : 0.08);
     this.ojos.emissiveIntensity = this.brillo;
+
+    // El golpe recibido: blanco de un frame que se apaga, y un apretón del
+    // cuerpo, como si el golpe lo aplastara. Es el "le di" que el jugador
+    // necesita ver antes de mirar la barra.
+    const blanco = this.destello / DESTELLO;
+    if (this.destello > 0) this.destello--;
+    for (const m of this.piel) m.emissiveIntensity = 0.85 * blanco;
+    const e = p.estira - 0.25 * blanco;
+    this.tronco.scale.set(1 + e, 1 + 0.5 * e, 1 - 0.7 * e);
+    // El abdomen bombea, que es como respira Drosophila: quieta, es lo que la
+    // hace parecer viva. Las antenas tiemblan a otro ritmo, cada una al suyo.
+    const bombea = 1 + 0.035 * Math.sin(tick * 0.11);
+    this.panza.scale.set(1, bombea, bombea);
+    this.antenas.forEach((an, i) => {
+      an.rotation.set(0.14 * Math.sin(tick * 0.23 + i * 2.1), 0, 0.12 * Math.sin(tick * 0.17 + i));
+    });
+    this.grupo.updateMatrixWorld(true);
+    this.mirar();
 
     this.historia.unshift({ x: a.x, y: a.y, h, f: a.facing });
     if (this.historia.length > HISTORIA) this.historia.pop();

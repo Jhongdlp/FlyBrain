@@ -7,8 +7,11 @@ intentó ya.
 ## Estado
 
 El motor está terminado y en verde. La mosca corre en `fly/` (LIF sobre las
-164.506 neuronas del conectoma) y maneja **una** acción del boss: la esquiva,
-por la fibra gigante. Todo lo demás del boss sigue sin cerebro.
+164.506 neuronas del conectoma) y maneja **dos** acciones del boss: la esquiva,
+por la fibra gigante, y el movimiento, leyendo las motoneuronas de las seis patas
+(`fly/patas.py`). El tacto de las patas la aparta de las paredes (pasa su
+experimento y su control cruzado); DNa02 no sobrevive al LIF, así que lejos de
+las paredes el rumbo es ruido de la red. Las armas siguen sin cerebro.
 
 ## El invariante del que cuelga todo
 
@@ -133,6 +136,11 @@ Está todo en la historia de EPOCH si alguna vez hace falta.
 - **`minions.rs` probablemente sobre.** Son unidades de apoyo del boss, contenido
   de aquel juego. Quitarlas toca `types.rs`, que es el contrato: cuesta más de lo
   que ahorra hasta que haya un motivo.
+- **Esquivar paredes es mecánico en las peleas grabadas, no la mosca.**
+  `piloto.virar` gira el rumbo hacia donde los rayos ven sitio libre, solo con
+  `Piloto(grabar=True)`: los experimentos miden a la mosca sin esto. Es para que
+  el juego se vea bien (0-2% del tiempo contra la pared, contra 32-36% con el
+  tacto solo). Se quita cuando una vía del conectoma la aparte sola.
 - **`BOSS_HP` de producción es 1000 y no está calibrado.** Con `--features dev`
   baja a 66, y ése es el valor que usa `scripts/dev.sh`.
 

@@ -12,12 +12,16 @@ inyecta como estimulación en neuronas sensoriales. La actividad de las neuronas
 descendentes se lee como acciones: moverse, esquivar, atacar. Entre esas dos
 cosas no hay política escrita a mano — hay una mosca.
 
-> **Estado: la mosca ya maneja una acción del boss.** La simulación del
+> **Estado: la mosca ya maneja dos acciones del boss.** La simulación del
 > conectoma reproduce el reflejo de escape —estimular LC4 y LPLC2 hace disparar a
 > la fibra gigante (DNp01) unas 30 veces más que estimular neuronas visuales al
 > azar— y ese reflejo ya está conectado a la esquiva del boss: cuando algo se le
 > viene encima, la fibra gigante dispara y el boss esquiva, a tiempo, contra un
-> control de esquivas al azar. Todo lo demás del boss sigue sin cerebro.
+> control de esquivas al azar. **Y camina con sus patas**: el boss se mueve
+> leyendo las 381 motoneuronas de pata del cordón ventral, cada lado empujando lo
+> que disparan las suyas, y el tacto de las patas la aparta de las paredes.
+> Lejos de ellas sus giros son ruido de la red, no decisiones. Las armas siguen
+> sin cerebro.
 > Detalles en [`fly/README.md`](fly/README.md).
 
 ## Por qué existe
