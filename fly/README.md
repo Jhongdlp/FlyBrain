@@ -84,6 +84,51 @@ Nada de eso invalida el resultado: el circuito de escape está en el conectoma,
 transmite, y responde de forma específica. Es exactamente lo que la fase 1 tenía
 que averiguar.
 
+## Qué es esto y qué no: un reflejo, no aprendizaje
+
+**La mosca no aprendió a esquivar. Nadie la entrenó.** Es un reflejo innato: el
+conectoma es el escaneo del cerebro de una mosca adulta real, y ese cerebro ya
+trae el circuito de escape armado. Una mosca esquiva un objeto que se le viene
+encima sin haberlo aprendido nunca, igual que nadie aprende el reflejo de la
+rodilla. Lo "entrenó" la evolución.
+
+El cableado *es* el comportamiento, y no lo pusimos nosotros: lo leímos del
+escaneo. Las dos entradas más fuertes a la fibra gigante son LC4 (6.362
+sinapsis) y LPLC2 (4.862). Ninguna regla dice "si viene un proyectil, esquivá";
+la respuesta sale de cómo está conectada la red, y por eso responde ~30 veces
+más a LC4/LPLC2 que a otras 311 neuronas visuales al azar.
+
+**Lo que pusimos a mano**, para no exagerar:
+
+- **La señal entra ya masticada.** En la mosca real, los ojos y el lóbulo óptico
+  calculan "algo se acerca" y recién ahí se activan LC4 y LPLC2. Acá el motor
+  calcula el looming (`2rv/d²`) y lo inyecta directo en esas neuronas: nos
+  salteamos el ojo. Es el atajo más grande del experimento.
+- **La salida la mapeamos nosotros.** En la mosca, la fibra gigante activa los
+  músculos del salto; acá, la esquiva del juego.
+- **Tres números globales ajustados barriendo**: escala sináptica, ruido de fondo
+  y ganancia de entrada. No neurona por neurona, pero elegidos por nosotros.
+- **La dirección de la esquiva** es geometría, no la mosca.
+
+**La parte incómoda.** Con todo eso junto, hoy el conectoma hace más o menos lo
+que haría `if looming > umbral: esquivar()`. **No lo comparamos contra esa
+regla**, y es probable que ella lo haga igual o mejor: usamos la única vía del
+cerebro donde la respuesta llega casi directa desde la entrada, y las otras
+164.000 neuronas no deciden nada. Lo demostrado es que la simulación y el enchufe
+funcionan y que un reflejo real se transfiere a un juego; **no** que el cerebro
+aporte algo que no aporte un `if`. Eso cambia cuando la decisión dependa de más
+cerebro: la cadena visual completa, girar, o dos conductas compitiendo.
+
+**Aprender de verdad** sería otra cosa: en la mosca ocurre sobre todo en el cuerpo
+pedunculado (*mushroom body*), donde la dopamina cambia la fuerza de ciertas
+sinapsis según si lo que pasó fue bueno o malo. Habría que implementar esa
+plasticidad y conectarle la recompensa del juego a las dopaminérgicas. Y ni
+siquiera en la mosca real el escape se aprende: si algo aprende, será qué
+situaciones son peligrosas, no a esquivar.
+
+**Pendiente:** la mosca contra la regla del `if`, con el mismo control de
+esquivas al azar. Es lo que hay que saber antes de mostrarlo.
+
 ## La mosca en el juego: DNp01 → esquiva
 
 ```

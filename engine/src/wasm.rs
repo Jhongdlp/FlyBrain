@@ -60,6 +60,10 @@ pub struct Game {
     /// exactamente lo que rompe la reproducibilidad que justifica el motor.
     cinta: Vec<(PlayerInput, BossAction)>,
     cabeza: usize,
+    /// Donde [`arena_static`] deja un muro para que JS lo lea. Propio y no el
+    /// buffer de estado: compartirlo pisaba el tick y los contadores del frame
+    /// actual, y solo no se notaba porque se leía antes del primer frame.
+    estatico: [f32; 4],
 }
 
 fn actor_fields(a: &Actor, out: &mut [f32]) {
@@ -205,6 +209,7 @@ pub extern "C" fn create(seed_lo: u32, seed_hi: u32) -> *mut Game {
         buf: vec![0.0; STATE_LEN],
         cinta: Vec::new(),
         cabeza: 0,
+        estatico: [0.0; 4],
     });
     let p = Box::into_raw(g);
     // El primer frame tiene que ser legible antes del primer step.
@@ -276,9 +281,8 @@ pub extern "C" fn arena_statics(g: *const Game) -> u32 {
     unsafe { g.as_ref().map_or(0, |g| g.w.arena.statics.len() as u32) }
 }
 
-/// Un estático como `[cx, cy, hx, hy]` en el buffer de estado, reutilizándolo
-/// antes del primer frame. La geometría no cambia durante la pelea, así que el
-/// render la lee una sola vez al arrancar.
+/// Un estático como `[cx, cy, hx, hy]`, de la arena del mundo **actual**: tras
+/// [`load_log`] es la de la pelea cargada, que puede no ser la de lanzamiento.
 ///
 /// # Safety
 /// `g` tiene que venir de [`create`] y `i` ser menor que [`arena_statics`].
@@ -291,8 +295,8 @@ pub unsafe extern "C" fn arena_static(g: *mut Game, i: u32) -> *const f32 {
     match g.w.arena.statics.get(i as usize) {
         Some(s) => {
             let c = s.center();
-            g.buf[0..4].copy_from_slice(&[c.x, c.y, c.x - s.min.x, c.y - s.min.y]);
-            g.buf.as_ptr()
+            g.estatico = [c.x, c.y, c.x - s.min.x, c.y - s.min.y];
+            g.estatico.as_ptr()
         }
         None => core::ptr::null(),
     }
@@ -382,6 +386,23 @@ mod tests {
         destroy(g);
     }
 
+
+    /// Regresión: `arena_static` escribía en el buffer de estado y pisaba el
+    /// tick del frame actual. Solo no se notaba mientras se leía antes del
+    /// primer frame.
+    #[test]
+    fn leer_un_muro_no_pisa_el_estado() {
+        let g = create(1, 0);
+        for _ in 0..10 {
+            unsafe { step_tick(g, 0x08, 0, 0) };
+        }
+        let antes = unsafe { core::slice::from_raw_parts(state_ptr(g), HEADER) }.to_vec();
+        unsafe { arena_static(g, 0) };
+        let despues = unsafe { core::slice::from_raw_parts(state_ptr(g), HEADER) };
+        assert_eq!(antes, despues);
+        assert_eq!(despues[0], 10.0);
+        destroy(g);
+    }
 
     #[test]
     fn destruir_un_puntero_nulo_no_rompe() {
@@ -483,6 +504,28 @@ mod reproduccion {
 
         let w = unsafe { &(*g).w };
         assert_eq!(crate::hash_world(w), esperado, "la reproducción diverge");
+        destroy(g);
+    }
+
+    /// Una pelea grabada en la arena abierta se reproduce en la abierta: el id
+    /// viaja en el log, y los muros que dibuja el cliente son los de esa arena.
+    #[test]
+    fn la_cinta_trae_su_arena() {
+        let l = log::FightLog {
+            version: log::FORMAT_VERSION,
+            world_seed: 7,
+            arena_id: 1,
+            arena_seed: 1,
+            brain_version: 0,
+            player_id: 0,
+            ticks: 120,
+            records: vec![log::Record { tick: 0, input: PlayerInput::default(), action: BossAction::Idle }],
+        };
+        let b = log::encode(&l);
+        let g = create(0, 0);
+        assert!(arena_statics(g) > 0, "arranca en la de lanzamiento");
+        assert_eq!(unsafe { load_log(g, b.as_ptr(), b.len() as u32) }, 120);
+        assert_eq!(arena_statics(g), 0, "tras cargar la cinta, la arena es la abierta");
         destroy(g);
     }
 

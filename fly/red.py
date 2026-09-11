@@ -166,3 +166,25 @@ def hz(disparos: np.ndarray, idx: np.ndarray, p: Parametros) -> float:
     if idx.size == 0 or disparos.shape[0] == 0:
         return 0.0
     return float(disparos[:, idx].sum() / idx.size / (disparos.shape[0] * p.dt / 1000.0))
+
+
+def somas(red: Red) -> np.ndarray:
+    """Posición 3D del cuerpo celular de cada neurona, en el orden de `red`.
+
+    `(n, 3)` float32, en unidades de vóxel del volumen de EM. **NaN donde no
+    hay soma**: el 16% de las neuronas, casi todas sensoriales, que tienen el
+    cuerpo celular fuera del sistema nervioso (en el ojo, en la periferia). Se
+    simulan igual; solo no hay dónde dibujarlas.
+    """
+    import pandas as pd
+
+    ann = pd.read_feather(DATOS / "anotaciones.feather")[["type", "somaLocation"]]
+    ann = ann[ann["type"].notna()].reset_index(drop=True)
+    # El orden de `red` sale del mismo filtro. Si alguna vez dejan de coincidir,
+    # cada neurona se dibujaría en el lugar de otra y nada lo delataría.
+    assert len(ann) == red.n and (ann["type"].to_numpy().astype(str) == red.tipo).all(), \
+        "las anotaciones no están en el orden de la red: borrá data/red.npz"
+    pos = np.full((red.n, 3), np.nan, np.float32)
+    tiene = ann["somaLocation"].notna().to_numpy()
+    pos[tiene] = np.stack(ann.loc[tiene, "somaLocation"].to_numpy()).astype(np.float32)
+    return pos

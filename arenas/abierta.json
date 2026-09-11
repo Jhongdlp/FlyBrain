@@ -1,0 +1,9 @@
+{
+  "id": 1,
+  "seed": 1,
+  "size": [32, 20],
+  "spawn_player": [4, 10],
+  "spawn_boss": [28, 10],
+  "statics": [],
+  "dynamics": []
+}

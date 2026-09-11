@@ -24,11 +24,24 @@ pub fn launch() -> Arena {
     parse(include_str!("../../arenas/launch.json")).expect("arenas/launch.json inválida")
 }
 
-/// Registro de arenas. El id viaja en el log de pelea y el servidor resuelve la
-/// geometría por su cuenta — el cliente no la manda.
+/// La arena de pruebas: mismo tamaño y mismos spawns, **sin un solo muro ni
+/// caja.** Para medir a la mosca sin que la cobertura ensucie nada: con muros,
+/// una esquiva que deja al boss detrás de una caja parece salvadora, y un tiro
+/// que roza una esquina parece un fallo de puntería.
+///
+/// Es una arena aparte y no `launch.json` vaciada a propósito: la pelea
+/// guionada del test de determinismo vive en la de lanzamiento, y vaciarla
+/// habría movido el golden hash por una razón que no es del motor.
+pub fn abierta() -> Arena {
+    parse(include_str!("../../arenas/abierta.json")).expect("arenas/abierta.json inválida")
+}
+
+/// Registro de arenas. El id viaja en el log de pelea, así que una grabación
+/// sabe en qué arena se jugó y el reproductor carga la correcta sola.
 pub fn by_id(id: u16) -> Option<Arena> {
     match id {
         0 => Some(launch()),
+        1 => Some(abierta()),
         _ => None,
     }
 }
@@ -143,6 +156,20 @@ mod tests {
     use crate::collision::closest_on_aabb;
     use crate::raycast::line_of_sight;
     use crate::types::{BOSS_RADIUS, World};
+
+    /// La arena de pruebas es la de lanzamiento sin nada adentro: si difiriera
+    /// en tamaño o spawns, comparar un experimento con y sin muros mediría dos
+    /// cosas a la vez.
+    #[test]
+    fn la_abierta_es_la_de_lanzamiento_vacia() {
+        let (a, l) = (abierta(), launch());
+        assert_eq!(a.id, 1);
+        assert!(a.statics.is_empty() && a.dynamics.is_empty());
+        assert_eq!((a.size, a.spawn_player, a.spawn_boss), (l.size, l.spawn_player, l.spawn_boss));
+        assert_eq!(by_id(1), Some(a.clone()));
+        let w = World::new(a, 1);
+        assert!(line_of_sight(w.boss.pos, w.player.pos, &w).0, "sin muros tiene que haber visión");
+    }
 
     #[test]
     fn launch_tiene_la_geometria_esperada() {
@@ -348,8 +375,11 @@ mod tests {
     }
 
     #[test]
-    fn by_id_solo_conoce_la_del_lanzamiento() {
+    fn by_id_conoce_las_dos_y_nada_mas() {
         assert!(by_id(0).is_some());
-        assert!(by_id(1).is_none());
+        assert!(by_id(1).is_some());
+        // Un id desconocido tiene que dar None: el reproductor lo convierte en
+        // "log ilegible" en vez de simular en la arena equivocada.
+        assert!(by_id(2).is_none());
     }
 }

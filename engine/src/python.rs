@@ -59,6 +59,8 @@ pub const R_TERMINAL: f32 = 1.0;
 
 struct Env {
     w: World,
+    /// En qué arena se juega. Ver `arena::by_id`.
+    arena: u16,
     rng: Rng,
     /// Media móvil del daño neto reciente. Es el "momentum" del estado global.
     momentum: f32,
@@ -74,11 +76,12 @@ struct Env {
 }
 
 impl Env {
-    fn new(seed: u64) -> Self {
+    fn new(seed: u64, id: u16) -> Self {
         let mut rng = Rng::new(seed);
         let s = rng.next_u32() as u64 | (rng.next_u32() as u64) << 32;
         Env {
-            w: World::new(arena::launch(), s),
+            w: World::new(arena::by_id(id).expect("arena validada en VecEnv::new"), s),
+            arena: id,
             rng,
             momentum: 0.0,
             ultimas: [0.0; 3],
@@ -90,7 +93,7 @@ impl Env {
 
     fn reset(&mut self) {
         let seed = self.rng.next_u32() as u64 | (self.rng.next_u32() as u64) << 32;
-        self.w = World::new(arena::launch(), seed);
+        self.w = World::new(arena::by_id(self.arena).expect("arena validada en VecEnv::new"), seed);
         self.momentum = 0.0;
         self.ultimas = [0.0; 3];
         self.seed = seed;
@@ -218,14 +221,20 @@ pub struct VecEnv {
 
 #[pymethods]
 impl VecEnv {
+    /// `arena`: 0 la de lanzamiento, 1 la abierta (sin muros ni cajas).
     #[new]
-    #[pyo3(signature = (n, seed = 0))]
-    fn new(n: usize, seed: u64) -> PyResult<Self> {
+    #[pyo3(signature = (n, seed = 0, arena = 0))]
+    fn new(n: usize, seed: u64, arena: u16) -> PyResult<Self> {
         if n == 0 {
             return Err(PyValueError::new_err("n tiene que ser > 0"));
         }
+        if arena::by_id(arena).is_none() {
+            return Err(PyValueError::new_err(format!("no hay arena con id {arena}")));
+        }
         Ok(VecEnv {
-            envs: (0..n).map(|i| Env::new(seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15))).collect(),
+            envs: (0..n)
+                .map(|i| Env::new(seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15), arena))
+                .collect(),
             obs: vec![0.0; n * OBS_DIM],
             rew: vec![0.0; n],
             done: vec![false; n],

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import {
   Estatico, Estado, Evento, EventKind, Fase, Forma, FormaKind, Lado, N_TOOLS,
 } from "./engine";
+import { Mosca, contorno } from "./mosca";
 
 // Monocromo frío + **un solo color reservado para el peligro**. No se usa para
 // nada más: ni suelo, ni boss, ni UI. Cuando aparece significa una sola cosa.
@@ -17,7 +18,6 @@ const MALLA = 0x24344a;
 const BORDE = 0x3d566f;
 const GEOMETRIA = 0x40586e;
 const JUGADOR = 0xa8c4dc;
-const BOSS = 0xdfe9f4;
 const PELIGRO = 0xff4a24;
 /** Radio del campo de lentitud, en unidades de mundo. Espeja
  *  `minions::CONTROLLER_ZONE`: si mintiera, el anillo dejaría de ser el
@@ -29,17 +29,6 @@ const ZONA_CONTROLADOR = 3.2;
 /** El mundo es 2D; la altura Y es puramente cosmética. */
 const ALTURA_ACTOR = 1.2;
 const ALTURA_MURO = 2.4;
-
-/** Contornos por inverted hull: malla duplicada, escalada, negra, BackSide. */
-function contorno(malla: THREE.Mesh, grosor = 1.06): THREE.Mesh {
-  const m = new THREE.Mesh(
-    malla.geometry,
-    new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide }),
-  );
-  m.scale.multiplyScalar(grosor);
-  malla.add(m);
-  return m;
-}
 
 /** Silueta distinta por herramienta: si dos proyectan la misma sombra, el
  *  jugador no puede anticipar y la telegrafía llega tarde. */
@@ -107,7 +96,7 @@ export class Render {
   private renderer: THREE.WebGLRenderer;
 
   private jugador: Cuerpo;
-  private boss: Cuerpo;
+  private boss: Mosca;
   private armas: THREE.Mesh[] = [];
   private proyectiles: THREE.Mesh[] = [];
   private cajas: THREE.Mesh[] = [];
@@ -126,7 +115,12 @@ export class Render {
   /** Frames de estela que le quedan al barrido tras la fase activa. */
   private estela = 0;
 
-  constructor(private ancho: number, private alto: number, estaticos: Estatico[]) {
+  constructor(
+    private contenedor: HTMLElement,
+    private ancho: number,
+    private alto: number,
+    estaticos: Estatico[],
+  ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
@@ -135,7 +129,7 @@ export class Render {
     // último la sombra salía negra pura y se leía como un agujero recortado en
     // el suelo, no como una sombra.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    document.body.appendChild(this.renderer.domElement);
+    contenedor.appendChild(this.renderer.domElement);
 
     this.escena.background = new THREE.Color(FONDO);
 
@@ -198,7 +192,7 @@ export class Render {
     }
 
     this.jugador = this.actor(0.4, JUGADOR);
-    this.boss = this.actor(0.9, BOSS, true);
+    this.boss = new Mosca(this.escena);
 
     for (let i = 0; i < N_TOOLS; i++) {
       const a = new THREE.Mesh(
@@ -211,7 +205,9 @@ export class Render {
       this.boss.grupo.add(a);
     }
 
-    addEventListener("resize", () => this.encuadrar());
+    // El contenedor y no la ventana: el panel del cerebro le quita ancho al
+    // juego al aparecer, y eso no dispara ningún `resize` de la ventana.
+    new ResizeObserver(() => this.encuadrar()).observe(contenedor);
   }
 
   /** Líneas cada unidad más un borde marcado: el límite de la arena es
@@ -235,12 +231,9 @@ export class Render {
     return g;
   }
 
-  private actor(radio: number, color: number, facetado = false): Cuerpo {
-    const geo = facetado
-      ? new THREE.IcosahedronGeometry(radio, 0)
-      : new THREE.CylinderGeometry(radio, radio, ALTURA_ACTOR, 12);
+  private actor(radio: number, color: number): Cuerpo {
     const malla = new THREE.Mesh(
-      geo,
+      new THREE.CylinderGeometry(radio, radio, ALTURA_ACTOR, 12),
       new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.7 }),
     );
     malla.castShadow = true;
@@ -255,7 +248,8 @@ export class Render {
   /** Inclinación de 60°: más bajo y las columnas tapan al jugador; más alto y
    *  la cobertura deja de leerse como algo que bloquea. */
   private encuadrar() {
-    const { innerWidth: w, innerHeight: h } = window;
+    const { clientWidth: w, clientHeight: h } = this.contenedor;
+    if (!w || !h) return;
     this.renderer.setSize(w, h);
 
     const margen = 1.15;
@@ -358,7 +352,9 @@ export class Render {
   dibujar(e: Estado, eventos: Evento[]) {
     this.animar(this.jugador, e.jugador.x, e.jugador.y, ALTURA_ACTOR / 2,
       e.jugador.facing, e.jugador.fase);
-    this.animar(this.boss, e.boss.x, e.boss.y, 0.9, e.boss.facing, e.boss.fase);
+    // Vuela a 1.25: las patas cuelgan y la sombra se despega del cuerpo, que
+    // es lo que dice "vuela" con la cámara desde arriba.
+    this.boss.actualizar(e.boss, 1.25, e.tick);
 
     // La maestría era la dirección de arte: un solo valor por arma controlando
     // opacidad, saturación y emisivo, y el arma se solidificaba a medida que el
@@ -377,7 +373,8 @@ export class Render {
       mat.color.setHSL(0.55, 0.1 + 0.5 * m, 0.45 + 0.25 * m);
       mat.emissive.setHSL(0.55, 1, 0.5 * m * m);
       const ang = (i / N_TOOLS) * Math.PI * 2 + e.tick * 0.008;
-      a.position.set(Math.cos(ang) * 1.5, 0.1, Math.sin(ang) * 1.5);
+      // Por fuera de la envergadura: a 1.5 las armas atravesaban las alas.
+      a.position.set(Math.cos(ang) * 1.9, 0.1, Math.sin(ang) * 1.9);
       a.rotation.set(ang, ang * 1.3, 0);
     });
 

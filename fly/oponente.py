@@ -25,7 +25,9 @@ import numpy as np
 
 import engine
 
-ARENA = Path(__file__).resolve().parent.parent / "arenas" / "launch.json"
+ARENAS = Path(__file__).resolve().parent.parent / "arenas"
+# Por id, como `arena::by_id` en el motor.
+ARCHIVO = {0: "launch.json", 1: "abierta.json"}
 TAU = 2 * np.pi
 RES = 0.5  # lado de la celda, en unidades de mundo
 
@@ -53,10 +55,12 @@ def _dentro(px, py, muros, extra):
 
 
 class Oponente:
-    def __init__(self, semilla=0):
-        a = json.loads(ARENA.read_text())
+    def __init__(self, semilla=0, arena=0):
+        a = json.loads((ARENAS / ARCHIVO[arena]).read_text())
         self.w, self.h = a["size"]
-        self.muros = np.array(a["statics"], float)
+        # `reshape`: en la arena abierta la lista viene vacía, y un array vacío
+        # sin forma rompería las comparaciones de `_dentro`.
+        self.muros = np.array(a["statics"], float).reshape(-1, 4)
         self.nx, self.ny = int(self.w / RES), int(self.h / RES)
 
         ix, iy = np.meshgrid(np.arange(self.nx), np.arange(self.ny), indexing="ij")
@@ -176,9 +180,13 @@ class Oponente:
 
 
 def _pelea(oponente, esquiva_en=(), ticks=900):
-    """Daño al boss por tramo de 300 ticks. El boss solo esquiva donde se le dice."""
+    """Daño al boss por tramo de 300 ticks. El boss solo esquiva donde se le dice.
+
+    En la arena de lanzamiento a propósito: lo que se comprueba es que rodea
+    cobertura, y en la abierta no hay nada que rodear.
+    """
     DASH = (2 << 6) | (4 << 3)
-    env = engine.VecEnv(1, seed=1)
+    env = engine.VecEnv(1, seed=1, arena=0)
     obs = env.reset()
     hp = [1000.0]
     for t in range(ticks):

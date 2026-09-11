@@ -50,6 +50,10 @@ GANANCIA = 10.0
 
 TICKS = 900
 SEMILLAS = 4
+# La arena abierta: sin muros ni cajas. Con cobertura, una esquiva que deja al
+# boss detrás de una caja parece salvadora y un tiro que roza una esquina parece
+# un fallo — y ninguna de las dos cosas es de la mosca.
+ARENA = 1
 # Un proyectil encima. Sobre `de_proyectiles`, no sobre lo que ve la mosca: el
 # jugador acercándose también le expande el campo visual —y está bien que así
 # sea, es el mismo circuito— pero no es algo que se pueda esquivar.
@@ -78,24 +82,30 @@ class Piloto:
     no habría dinámica, y la fibra gigante no podría integrar nada.
     """
 
-    def __init__(self, red, semilla=0, **kw):
+    def __init__(self, red, semilla=0, grabar=False, **kw):
         self.sim = R.Simulador(red, R.Parametros(**kw), semilla)
         self.loom = red.indices("LC4", "LPLC2")
         self.gf = red.indices("DNp01")
         self.ext = np.zeros(red.n, np.float32)
+        # Por tick, qué neuronas dispararon al menos una vez. Es lo que dibuja el
+        # panel del cerebro en el navegador.
+        self.actividad = [] if grabar else None
 
     def tick(self, looming: float) -> bool:
         self.ext[:] = 0.0
         self.ext[self.loom] = GANANCIA * looming
-        return bool(self.sim.avanzar(TICK_MS, self.ext)[:, self.gf].any())
+        d = self.sim.avanzar(TICK_MS, self.ext)
+        if self.actividad is not None:
+            self.actividad.append(np.flatnonzero(d.any(axis=0)).astype(np.uint32))
+        return bool(d[:, self.gf].any())
 
 
 def corrida(politica, semilla=1):
     """Una pelea. `politica(t, looming, w) -> (byte, param)` decide al boss."""
-    env = engine.VecEnv(1, seed=semilla)
+    env = engine.VecEnv(1, seed=semilla, arena=ARENA)
     # Una semilla distinta es un oponente con otro carácter —otra distancia de
     # tiro preferida— y por lo tanto otra pelea, no la misma con otro ruido.
-    oponente = Oponente(semilla)
+    oponente = Oponente(semilla, arena=ARENA)
     obs = env.reset()
     looms, proyectil, esquivas = [], [], []
 
@@ -195,10 +205,53 @@ def main():
         print("\n  NO: los disparos de la fibra gigante no siguen a la amenaza.")
 
 
+PUBLICO = Path(__file__).resolve().parent.parent / "web" / "public"
+
+
+def exportar_cerebro(red):
+    """`web/public/cerebro.bin`: dónde dibujar cada neurona, y de qué grupo es.
+
+    `uint32 n`, `float32[n*3]` posiciones, `uint8[n]` grupo. Posiciones ya
+    centradas, escaladas a ~1 y orientadas con el cerebro arriba y el cordón
+    ventral abajo, para que el navegador no tenga que saber nada del volumen de
+    EM. NaN donde no hay soma. Grupos: 0 el resto, 1 LC4/LPLC2 (los detectores de
+    looming), 2 DNp01 (la fibra gigante).
+    """
+    p = R.somas(red)
+    ok = ~np.isnan(p[:, 0])
+    # El eje largo del volumen es z: cerebro en z≈27.000, cordón ventral en
+    # z≈101.000. Va vertical, con el cerebro arriba.
+    xyz = np.stack([p[:, 0], -p[:, 2], p[:, 1]], axis=1)
+    centro = np.nanmean(xyz[ok], axis=0)
+    xyz = (xyz - centro) / np.nanmax(np.abs(xyz[ok] - centro))
+    grupo = np.zeros(red.n, np.uint8)
+    grupo[red.indices("LC4", "LPLC2")] = 1
+    grupo[red.indices("DNp01")] = 2
+    with open(PUBLICO / "cerebro.bin", "wb") as f:
+        f.write(np.uint32(red.n).tobytes())
+        f.write(xyz.astype(np.float32).tobytes())
+        f.write(grupo.tobytes())
+    return int(ok.sum())
+
+
+def exportar_actividad(actividad, destino):
+    """`uint32 ticks`, `uint32[ticks+1]` offsets, `uint32[]` índices de neurona."""
+    offsets = np.zeros(len(actividad) + 1, np.uint32)
+    offsets[1:] = np.cumsum([len(a) for a in actividad])
+    with open(destino, "wb") as f:
+        f.write(np.uint32(len(actividad)).tobytes())
+        f.write(offsets.tobytes())
+        f.write(np.concatenate(actividad).tobytes())
+    return int(offsets[-1])
+
+
 def grabar(nombre="mosca"):
-    """Juega una pelea con la mosca y la deja en `web/public/<nombre>.bin`."""
+    """Juega una pelea con la mosca y la deja en `web/public/<nombre>.bin`, más
+    su actividad neuronal en `<nombre>.act` para el panel del cerebro."""
     red = R.construir()
-    pil = Piloto(red)
+    PUBLICO.mkdir(exist_ok=True)
+    dibujadas = exportar_cerebro(red)
+    pil = Piloto(red, grabar=True)
     r = corrida(lambda t, l, w: (DASH, de_costado(w)) if pil.tick(l) else (IDLE, 0))
 
     # La comprobación que hace honesta a la grabación: el mismo motor re-simula
@@ -207,9 +260,11 @@ def grabar(nombre="mosca"):
     _, boss_hp, ticks = engine.reproducir(r["log"])
     assert boss_hp == r["hp"], f"la reproducción diverge: {boss_hp} contra {r['hp']}"
 
-    destino = Path(__file__).resolve().parent.parent / "web" / "public" / f"{nombre}.bin"
-    destino.parent.mkdir(exist_ok=True)
+    destino = PUBLICO / f"{nombre}.bin"
     destino.write_bytes(r["log"])
+    spikes = exportar_actividad(pil.actividad, PUBLICO / f"{nombre}.act")
+    print(f"cerebro: {dibujadas:,} de {red.n:,} neuronas con posición · "
+          f"{spikes:,} disparos grabados ({spikes / len(pil.actividad):.0f} por tick)")
     print(f"{ticks} ticks · {int(r['esquivas'].sum())} esquivas · "
           f"daño al boss {1000 - r['hp']:.0f} · {len(r['log'])} bytes")
     print(f"reproducción verificada → {destino.relative_to(destino.parents[2])}")

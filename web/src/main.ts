@@ -7,6 +7,7 @@
 // que hace que la pelea que se grabó y la que se ve sean la misma.
 
 import { EventKind, Evento, Fase, Lado, Motor } from "./engine";
+import { Cerebro } from "./cerebro";
 import { Render } from "./render";
 
 /** Paso fijo, el mismo que el motor. Nunca delta time variable. */
@@ -32,7 +33,8 @@ async function main() {
     tel.textContent = `no se pudo cargar la pelea (HTTP ${r.status})`;
     return;
   }
-  const ticks = motor.cargarPelea(new Uint8Array(await r.arrayBuffer()));
+  const grabacion = new Uint8Array(await r.arrayBuffer());
+  const ticks = motor.cargarPelea(grabacion);
   if (ticks === 0) {
     // Casi siempre: el .wasm y el .bin son de builds distintos. Se regeneran
     // juntos con `scripts/build-wasm.sh`.
@@ -40,17 +42,54 @@ async function main() {
     return;
   }
 
-  const render = new Render(motor.ancho, motor.alto, motor.estaticos);
+  const render = new Render(document.getElementById("juego")!, motor.ancho, motor.alto, motor.estaticos);
+
+  // El cerebro solo aparece si la pelea trae su actividad grabada: las que
+  // graba `fly/piloto.py --grabar`. La pelea guionada del golden test no la
+  // trae, porque no la jugó ninguna mosca.
+  const panel = document.getElementById("cerebro")!;
+  const cerebro = await Cerebro.cargar(panel, cual);
+  if (cerebro) {
+    panel.hidden = false;
+    document.getElementById("neuronas")!.textContent = "164.506 neuronas";
+    const agrandar = document.getElementById("agrandar")!;
+    const esconder = document.getElementById("esconder")!;
+    agrandar.onclick = () => {
+      panel.classList.remove("oculto");
+      agrandar.textContent = panel.classList.toggle("grande") ? "⤡" : "⤢";
+    };
+    esconder.onclick = () => {
+      const oculto = panel.classList.toggle("oculto");
+      esconder.textContent = oculto ? "cerebro ▸" : "–";
+      agrandar.hidden = oculto;
+    };
+  }
+  const lectura = document.getElementById("lectura")!;
+  const escape = document.getElementById("escape")!;
   let estado = motor.estado();
   const hp0 = { jugador: estado.jugador.hp, boss: estado.boss.hp };
   let corriendo = true;
 
-  // Espacio pausa. No es una acción del juego —no entra en la simulación—
-  // sino una capa de instrumentos encima.
+  /** La grabación desde el tick cero. Se vuelve a cargar el mismo log: el
+   *  motor la re-simula igual, así que es exactamente la misma pelea. */
+  function reiniciar() {
+    motor.cargarPelea(grabacion);
+    estado = motor.estado();
+    for (const m of marcador) m.aciertos = m.intentos = 0;
+    cerebro?.reiniciar();
+    fin.style.display = "none";
+    corriendo = true;
+    deuda = 0;
+  }
+
+  // Espacio pausa y R reinicia. No son acciones del juego —no entran en la
+  // simulación— sino una capa de instrumentos encima.
   addEventListener("keydown", (ev) => {
     if (ev.code === "Space") {
       ev.preventDefault();
       corriendo = !corriendo;
+    } else if (ev.code === "KeyR") {
+      reiniciar();
     }
   });
 
@@ -83,6 +122,14 @@ async function main() {
     if (deuda > DT_MS * MAX_ATRASO) deuda = 0;
 
     render.dibujar(estado, eventos);
+    if (cerebro && !panel.classList.contains("oculto")) {
+      // La actividad del tick t es la que decidió qué hacía el boss en ese
+      // tick; el estado ya va por t+1 porque el paso se aplicó.
+      const l = cerebro.avanzar(estado.tick - 1);
+      cerebro.dibujar();
+      lectura.textContent = `${String(l.disparos).padStart(5)} disparos este tick · ${l.looming} en LC4/LPLC2`;
+      escape.classList.toggle("activa", l.escape);
+    }
 
     const pct = (hp: number, max: number) => `${Math.max(0, (hp / max) * 100)}%`;
     barraJugador.style.width = pct(estado.jugador.hp, hp0.jugador);

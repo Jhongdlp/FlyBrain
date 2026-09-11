@@ -8,12 +8,40 @@
       :root { color-scheme: dark; }
       html, body { margin: 0; height: 100%; background: #070a0f; overflow: hidden; }
       canvas { display: block; }
-      #hud {
-        position: fixed; inset: 0; pointer-events: none;
+
+      #juego { position: fixed; inset: 0; }
+
+      /* El cerebro es una miniatura en la esquina: el juego es lo principal.
+         Tres estados — miniatura, grande y escondido — con los botones de
+         arriba a la derecha del panel. Si la pelea no trae actividad grabada,
+         el panel no aparece. */
+      #cerebro {
+        position: fixed; top: 16px; right: 16px; z-index: 2;
+        width: 300px; height: 240px; background: #070a0f;
+        border: 1px solid #1b2836; overflow: hidden;
+        transition: width .2s, height .2s;
+      }
+      #cerebro.grande { width: min(46vw, 760px); height: min(74vh, 680px); }
+      #cerebro.oculto { width: 132px; height: 30px; }
+      #cerebro.oculto canvas, #cerebro.oculto .rotulos > :not(.botones) { display: none; }
+      /* En miniatura, solo lo que se lee de un vistazo: la fibra gigante. */
+      #cerebro:not(.grande) .leyenda > :not(#escape),
+      #cerebro:not(.grande) .lectura { display: none; }
+      #cerebro:not(.grande) .titulo { font-size: 9px; top: 9px; left: 10px; }
+      #cerebro:not(.grande) .leyenda { bottom: 8px; right: 10px; font-size: 10px; }
+      .botones { top: 5px; right: 6px; pointer-events: auto; display: flex; gap: 4px; }
+      .botones button {
+        font: inherit; font-size: 11px; color: #8fa8bd; background: #0e1824;
+        border: 1px solid #1b2836; padding: 2px 7px; cursor: pointer;
+      }
+      .botones button:hover { color: #dfe9f4; border-color: #35485f; }
+
+      #hud, .rotulos {
+        position: absolute; inset: 0; pointer-events: none;
         font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
         color: #5d7186; letter-spacing: .08em; text-transform: uppercase;
       }
-      #hud > div { position: absolute; }
+      #hud > div, .rotulos > div { position: absolute; }
       #tel { top: 16px; left: 20px; }
       #ayuda { bottom: 16px; left: 20px; }
       #fin {
@@ -29,15 +57,24 @@
 
       /* El boss cruza la pantalla arriba: es una pelea contra un boss y la
          barra lo dice antes que cualquier texto. */
-      #boss { top: 46px; left: 50%; transform: translateX(-50%); width: min(52vw, 640px); }
+      #boss { top: 46px; left: 50%; transform: translateX(-50%); width: min(80%, 640px); }
       #boss .barra > i { background: #dfe9f4; }
       #boss span { display: block; margin-bottom: 6px; text-align: center; font-size: 10px; }
 
       #vida { bottom: 44px; left: 20px; width: 200px; }
       #vida span { display: block; margin-bottom: 6px; font-size: 10px; }
+
+      .rotulos .titulo { top: 16px; left: 20px; }
+      .rotulos .lectura { bottom: 16px; left: 20px; }
+      .rotulos .leyenda { bottom: 16px; right: 20px; text-align: right; }
+      .punto { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+               margin-right: 6px; vertical-align: 1px; }
+      #escape { color: #5d7186; transition: color .05s; }
+      #escape.activa { color: #ffffff; }
     </style>
   </head>
   <body>
+    <div id="juego">
     <div id="hud">
       <div id="tel"></div>
       <div id="boss">
@@ -48,8 +85,24 @@
         <span>sujeto</span>
         <div class="barra"><i id="playerHp"></i></div>
       </div>
-      <div id="ayuda">␣ pausa · ?pelea=nombre para otra grabación</div>
+      <div id="ayuda">␣ pausa · r reiniciar · ?pelea=nombre para otra grabación</div>
       <div id="fin"></div>
+    </div>
+    </div>
+    <div id="cerebro" hidden>
+      <div class="rotulos">
+        <div class="titulo">conectoma MaleCNS · <span id="neuronas"></span></div>
+        <div class="botones">
+          <button id="agrandar" title="agrandar / achicar">⤢</button>
+          <button id="esconder" title="esconder / mostrar">–</button>
+        </div>
+        <div class="lectura" id="lectura"></div>
+        <div class="leyenda">
+          <div><span class="punto" style="background:#35d6c0"></span>LC4 + LPLC2 · detectan lo que se acerca</div>
+          <div id="escape"><span class="punto" style="background:#fff"></span>DNp01 · fibra gigante → esquiva</div>
+          <div><span class="punto" style="background:#dfe9f4;opacity:.5"></span>el resto · arrastrá para girar</div>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

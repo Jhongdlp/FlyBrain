@@ -92,14 +92,20 @@ export class Motor {
 
   readonly ancho: number;
   readonly alto: number;
-  readonly estaticos: Estatico[];
+  /** Los muros de la arena **actual**: se releen al cargar una pelea, que
+   *  puede ser de otra arena que la de arranque. */
+  estaticos: Estatico[] = [];
 
   private constructor(private e: Exports, seed: bigint) {
     this.g = e.create(Number(seed & 0xffffffffn), Number((seed >> 32n) & 0xffffffffn));
     this.len = e.state_len();
     this.ancho = e.arena_width();
     this.alto = e.arena_height();
+    this.leerEstaticos();
+  }
 
+  private leerEstaticos() {
+    const e = this.e;
     this.estaticos = [];
     for (let i = 0; i < e.arena_statics(this.g); i++) {
       const p = e.arena_static(this.g, i) / 4;
@@ -123,7 +129,10 @@ export class Motor {
     const p = this.e.alloc(log.byteLength);
     try {
       new Uint8Array(this.e.memory.buffer, p, log.byteLength).set(log);
-      return this.e.load_log(this.g, p, log.byteLength);
+      const ticks = this.e.load_log(this.g, p, log.byteLength);
+      // El log trae su arena: los muros a dibujar son los de ésa.
+      this.leerEstaticos();
+      return ticks;
     } finally {
       this.e.dealloc(p, log.byteLength);
     }
