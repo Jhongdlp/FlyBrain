@@ -8,6 +8,7 @@ paso0.py       comprueba que la fase 1 es construible (datos, aristas, E/I, circ
 red.py         el conectoma como matriz dispersa + el simulador LIF
 sobresalto.py  el experimento: ¿la fibra gigante responde al looming?
 piloto.py      la mosca maneja la esquiva del boss dentro del juego
+ojo.py         la retina: a dónde mira cada fotorreceptor
 oponente.py    el jugador guionado: rodea la cobertura, recupera el tiro y dispara
 ```
 
@@ -219,3 +220,46 @@ jugó la mosca, no una aproximación.
 - **Velocidad.** 900 ticks de mosca tardan ~2,5 minutos en CPU con esta
   ganancia. Para grabar peleas sueltas sobra; para generar miles, es donde entra
   la GPU.
+
+## Los ojos: primer intento, y dónde choca
+
+El objetivo era quitar el atajo: que la luz entre por los fotorreceptores y que
+el propio conectoma calcule "algo se acerca" hasta LC4, en vez de inyectárselo.
+
+**Lo que hay en los datos.** 3.377 fotorreceptores R1-R6, pero 1.989 son
+fragmentos sin una sola sinapsis de salida con peso ≥5: el ojo queda al borde
+del volumen escaneado. El ojo efectivo son **1.382 fotorreceptores en 561
+columnas** (el derecho al ~44%, el izquierdo al ~21%). No traen columna; la
+heredan de la neurona de lámina a la que más le hablan (`ojo.py`). El camino
+existe y es el de los libros: fotorreceptor → L1/L2/L3 (100.000+ sinapsis) →
+médula → **LC4/LPLC2 a 3 saltos → DNp01 a 4.**
+
+**Lo que pasa al simular.** Los fotorreceptores responden a la luz y la lámina se
+enciende a oscuras. **Pero a LC4/LPLC2 no llega nada: 0 Hz** en toda
+combinación probada. Se corta en la primera capa de la médula:
+
+| | lámina (claro → oscuro) | Mi1/Tm3 | T4 | T5 | LC4/LPLC2 |
+|---|---|---|---|---|---|
+| modelo tal cual | 28 → 37 | 0 | 0 | 0 | **0** |
+| + tono de reposo en el lóbulo óptico | 6,8 → 12,1 | 8,9 → 10,3 | ~1 | ~0,3 | **0** |
+
+**Por qué, y no es un ajuste.** El sistema visual de la mosca calcula con
+inversiones de signo por desinhibición: la luz apaga a L1 (glutamatérgica,
+inhibidora), y L1 deja de frenar a Mi1, que se enciende. Eso funciona porque en
+la mosca real esas neuronas son de voltaje graduado y siempre algo activas. En
+nuestro modelo una neurona en reposo está callada, y a una neurona callada no se
+la puede "dejar de frenar". Con un tono de reposo la desinhibición viaja un poco
+más, pero se diluye capa a capa. Y la selectividad al looming necesita además
+detectores de dirección (T4/T5) que dependen de dinámicas finas que un LIF
+uniforme no tiene.
+
+**Es un resultado conocido.** Lappalainen et al. (Nature, 2024) construyeron un
+modelo del sistema visual de la mosca con la conectividad del conectoma y
+encontraron que la conectividad sola no alcanza: los parámetros desconocidos
+por neurona y por sinapsis hubo que ajustarlos entrenando la red en una tarea
+(detectar movimiento). Con eso, el modelo predijo la separación ON/OFF y la
+selectividad de dirección medidas en 26 estudios. Su código es `flyvis` (MIT).
+
+**Conclusión del intento:** el reflejo del cerebro central funciona sin
+entrenar porque es una vía corta de neuronas que disparan espigas. El lóbulo
+óptico es otra clase de computadora, y no se deja simular con el mismo modelo.
