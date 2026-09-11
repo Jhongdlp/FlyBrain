@@ -111,8 +111,12 @@ class Simulador:
     alquilar una GPU.
     """
 
-    def __init__(self, red: Red, p: Parametros, semilla: int = 0):
+    def __init__(self, red: Red, p: Parametros, semilla: int = 0, fijas=None):
+        """`fijas`: índices de neuronas cuya actividad la dicta algo de afuera
+        (el ojo de `flyvis`). Ignoran su entrada sináptica y solo responden a la
+        corriente externa."""
         self.red, self.p = red, p
+        self.fijas = fijas
         self.rng = np.random.default_rng(semilla)
         self.V = np.zeros(red.n, np.float32)
         self.I = np.zeros(red.n, np.float32)
@@ -129,6 +133,8 @@ class Simulador:
         activas = np.flatnonzero(self.ultimo)
         if activas.size:
             self.I += p.escala * np.asarray(red.W[:, activas].sum(axis=1), np.float32).ravel()
+        if self.fijas is not None:
+            self.I[self.fijas] = 0.0
 
         e = self.rng.standard_normal(red.n).astype(np.float32) * p.ruido
         if ext is not None:

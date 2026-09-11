@@ -90,6 +90,48 @@ def retina(red: R.Red) -> Retina:
     return Retina(indice, ojo, x, y)
 
 
+# Los tipos que simula `flyvis` y que existen con el mismo nombre en MaleCNS.
+# Los fotorreceptores quedan afuera: los simula `flyvis` y en MaleCNS se llaman
+# distinto ("R1-R6"); tampoco hacen falta, porque nadie los lee desde acá.
+TIPOS_FLYVIS = (
+    "L1 L2 L3 L4 L5 Lawf1 Lawf2 C2 C3 Mi1 Mi2 Mi4 Mi9 Mi10 Mi13 Mi14 Mi15 "
+    "T1 T2 T2a T3 T4a T4b T4c T4d T5a T5b T5c T5d Tm1 Tm2 Tm3 Tm4 Tm5Y Tm5a "
+    "Tm5b Tm5c Tm9 Tm16 Tm20 Tm30 TmY3 TmY4 TmY5a TmY10 TmY13 TmY14 TmY15 TmY18"
+).split()
+
+
+def columnas_derivadas(red: R.Red, lado: str = "R", rondas: int = 4, minimo: float = 20.0):
+    """Columna `(hex1, hex2)` de cada neurona de un ojo, directa o derivada.
+
+    Directa si el conectoma la anota. Si no, el promedio de las columnas de sus
+    vecinos sinápticos —entradas y salidas— que ya la tienen, pesado por
+    sinapsis, en rondas: lo que se asigna en una ronda sirve de evidencia a la
+    siguiente. Solo se asigna con al menos `minimo` sinapsis de evidencia.
+
+    Devuelve `(n, 2)` float con NaN donde no se pudo, y la ronda en que se
+    asignó cada una (0 = anotada).
+    """
+    col = _columnas(red)
+    del_lado = (col["lado"].to_numpy() == lado)
+    H = np.array(col[["hex1", "hex2"]], dtype=float)  # copia: pandas 3 la da de solo lectura
+    H[~del_lado] = np.nan
+    ronda = np.where(np.isnan(H[:, 0]), -1, 0)
+
+    A = abs(red.W).tocsr()           # (post, pre)
+    S = (A + A.T).tocsr()            # vecinos en las dos direcciones
+    for k in range(1, rondas + 1):
+        conocida = ~np.isnan(H[:, 0])
+        Hk = np.where(conocida[:, None], H, 0.0)
+        peso = S @ conocida.astype(float)
+        suma = S @ Hk
+        nueva = (~conocida) & del_lado & (peso >= minimo)
+        H[nueva] = suma[nueva] / peso[nueva, None]
+        ronda[nueva] = k
+        if not nueva.any():
+            break
+    return H, ronda
+
+
 if __name__ == "__main__":
     r = R.construir()
     ret = retina(r)
@@ -100,3 +142,12 @@ if __name__ == "__main__":
         cols = len(set(zip(ret.x[m], ret.y[m])))
         print(f"  ojo {lado}: {m.size:5} fotorreceptores en {cols:4} columnas · "
               f"campo {np.ptp(ret.x[m]):.0f}° x {np.ptp(ret.y[m]):.0f}°")
+
+    H, ronda = columnas_derivadas(r)
+    print("\ncolumnas del ojo derecho, tipos que simula flyvis:")
+    print(f"  {'tipo':7} {'neuronas':>8} {'anotada':>8} {'derivada':>9} {'sin':>5}")
+    lado = _columnas(r)["lado"].to_numpy()
+    for t in TIPOS_FLYVIS:
+        m = (r.tipo == t) & (lado == "R")
+        if m.sum():
+            print(f"  {t:7} {m.sum():8} {(ronda[m] == 0).sum():8} {(ronda[m] > 0).sum():9} {(ronda[m] < 0).sum():5}")
