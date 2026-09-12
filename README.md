@@ -2,7 +2,7 @@
 
 # 🪰 FlyBrain
 
-**Un boss de videojuego controlado en tiempo real por el conectoma biológico de una mosca.**
+**A video game boss controlled in real time by the biological connectome of a fly.**
 
 [![Rust](https://img.shields.io/badge/engine-Rust_1.80+-orange.svg?style=flat-square&logo=rust)](engine/)
 [![WebAssembly](https://img.shields.io/badge/runtime-WASM_bit--identical-654FF0.svg?style=flat-square&logo=webassembly)](web/)
@@ -14,231 +14,220 @@
 
 <br/>
 
-*No por un árbol de comportamiento. No por una red entrenada con RL.*  
-Por una simulación biofísica de neuronas **leaky integrate-and-fire (LIF)** ejecutada directamente sobre el grafo de conectividad real del cerebro de *Drosophila melanogaster* — el dataset **MaleCNS v1.0** de Janelia/FlyEM (~164.506 neuronas, público bajo CC-BY 4.0).
+*Not a behavior tree. Not a policy trained with deep reinforcement learning.*  
+Driven by a biophysical simulation of **leaky integrate-and-fire (LIF)** neurons running directly over the full biological wiring diagram of the adult *Drosophila melanogaster* central nervous system — the **MaleCNS v1.0** dataset from Janelia/FlyEM (~164,506 neurons, public under CC-BY 4.0).
 
-[Demostración y Modos](#-modos-interactivos-en-el-navegador) •
-[Arquitectura](#-cómo-está-armado) •
-[Circuito Biológico](#-neurobiología-conectada-y-validada) •
-[Determinismo](#-determinismo-bit-a-bit) •
-[Inicio Rápido](#-arrancar-en-3-minutos) •
-[English Summary](#-english-overview)
+[Live Demo & Modes](#-interactive-web-modes) •
+[Architecture](#-architecture--components) •
+[Biological Circuits](#-validated-neurobiology--circuits) •
+[Determinism](#-bit-for-bit-determinism) •
+[Quickstart](#-quickstart-in-3-minutes) •
+[Español](README_es.md)
 
 ---
 
-![FlyBrain Arena y Retina](assets/pelea.png)
-*El simulador en acción: arena física ortográfica Three.js, visualización de los 1.442 omatidios de la retina de Drosophila, actividad neural en vivo y boss guiado por reflejos y motoneuronas.*
+![FlyBrain Arena and Retina](assets/pelea.png)
+*The simulation in action: orthographic Three.js physical arena, 1,442-ommatidia biological Drosophila retina, live neural telemetry, and a boss guided by real neural reflexes and motor neurons.*
 
 </div>
 
 ---
 
-## ⚡ Estado Actual del Proyecto
+## ⚡ Current Project Status
 
-| Acción / Subsistema | Circuito Biológico Conectado | Estado | Comprobación |
+| Action / Subsystem | Biological Circuit Connected | Status | Empirical Validation |
 |---|---|---|---|
-| **Esquiva (Dodge)** | Visual looming (`LC4` + `LPLC2`) → Fibra Gigante (`DNp01`) | **Validado** | Disparo selectivo 30x–70x sobre controles aleatorios |
-| **Locomoción (Caminar)** | 381 motoneuronas del Cordón Nervioso Ventral (VNC) | **Validado** | Empuje bilateral asimétrico + reflejo táctil de patas |
-| **Embestida (Ataque)** | Feromona rival cVA (`DA1_lPN`) → Kenyon Cells → `MBON` valencia | **En pruebas** | La balanza de valencia de las MBON decide embestir |
-| **Recompensa / Castigo** | Dopaminérgicas `PAM` (acierto) y `PPL1` (daño recibido) | **Medido** | Deprime sinapsis `KC→MBON` selectivamente |
-| **Visión de Omatidios** | 1.442 omatidios hexagonales con mapeo egocéntrico azimutal | **Implementado** | Proyección retiniana directa sobre el canvas WebGL |
+| **Dodge / Evasion** | Visual looming (`LC4` + `LPLC2`) → Giant Fiber (`DNp01`) | **Validated** | 30x–70x selective spike ratio over randomized visual controls |
+| **Locomotion (Walk)** | 381 Ventral Nerve Cord (VNC) leg motor neurons | **Validated** | Asymmetric bilateral drive + tactile leg wall-avoidance reflex |
+| **Lunge (Attack)** | Rival cVA pheromone (`DA1_lPN`) → Kenyon Cells → `MBON` valence | **In testing** | Mushroom Body Output Neuron valence balance triggers lunges |
+| **Reward / Punishment** | Dopaminergic `PAM` (hits) & `PPL1` (damage received) | **Measured** | Selectively depresses `KC→MBON` synapses in respective lobes |
+| **Compound Eye Vision** | 1,442 hexagonal ommatidia with egocentric azimuth mapping | **Implemented** | Direct retinal projection rendered to WebGL canvas |
 
-> **Logro:** La mosca ya maneja tres acciones del boss. Cuando un proyectil o ataque se le viene encima, la señal de looming dispara la fibra gigante innata (**DNp01**) y el boss esquiva en el instante preciso. Al caminar, el empuje resulta de la integración de las motoneuronas de pata del VNC, y el tacto en las cutículas la aparta de los muros. Cuando percibe el olor de combate del rival, la balanza de las *Mushroom Body Output Neurons* (MBON) desata la embestida.
-
----
-
-## 📸 Galería y Capacidades
-
-### 1. Reflejo de Escape en el Conectoma Completo (164.506 Neuronas)
-Cuando una amenaza se aproxima rápidamente, el circuito visual de detección de looming activa de manera sincronizada las neuronas de proyección lobular `LC4` y `LPLC2`. La señal converge con latencia mínima sobre la interneurona gigante `DNp01` en el cuello, ordenando la esquiva inmediata.
-
-<div align="center">
-  <img src="assets/conectoma-escape.png" alt="Conectoma MaleCNS mostrando activación de LC4, LPLC2 y DNp01" width="100%">
-  <p><em>Nube de puntos 3D con 164.506 neuronas del conectoma MaleCNS: activación en cian del lóbulo óptico y disparo blanco en la fibra gigante descendente DNp01.</em></p>
-</div>
-
-### 2. Neuro-Lab: Optogenética Virtual y Secuenciador Neural de 16 Pasos
-Consola de estimulación interactiva que permite excitar directamente grupos neuronales específicos (motoneuronas protorácicas `T1-L` y `T1-R`, flexores `T2-T3`, motor de vuelo alar `WINGS`, neurona de marcha atrás `MDN Moonwalker` y neuronas `P1` de cortejo/agresión) y observar la respuesta biomecánica articular del modelo 3D de la mosca.
-
-<div align="center">
-  <img src="assets/neurolab.png" alt="Neuro-Lab con secuenciador de 16 pasos y modelo anatómico" width="100%">
-  <p><em>Consola Neuro-Lab: secuenciador de patrones motores de 16 pasos sincronizado a BPM configurable con retroalimentación articular en tiempo real.</em></p>
-</div>
-
-### 3. Telegrafía de Ataques y Advertencia Visual
-Fiel al diseño de combate exigente, cualquier técnica del boss telegrafía su área de efecto en el suelo antes de ejecutarse mediante un decal dinámico, permitiendo al jugador esquivar o buscar cobertura si reacciona dentro de los fotogramas de aviso.
-
-<div align="center">
-  <img src="assets/telegrafia.png" alt="Telegrafía de ataque del Boss" width="90%">
-  <p><em>Telegrafía de la embestida proyectada sobre el mantel de madera.</em></p>
-</div>
-
-### 4. Locomoción Biomecánica y Cortejo Acústico
-Simulación de patrones motores rítmicos (*courtship song* y marcha) modulados por osciladores de frecuencia y análisis espectral de audio en tiempo real.
-
-<div align="center">
-  <img src="assets/baile-cortejo.png" alt="Cortejo y locomoción bio-mecánica" width="90%">
-  <p><em>Visualización articular en primer plano: vibración alar unilateral, flexión de patas y activación de motoneuronas torácicas.</em></p>
-</div>
+> **Milestone:** The fly now drives three primary boss actions. When an incoming projectile or attack approaches, looming optical expansion excites the innate Giant Fiber (**DNp01**), commanding a precision dodge. When walking, propulsion emerges from the integrated firing rates of 381 VNC leg motor neurons, with mechanical leg feedback steering it away from walls. When the olfactory threshold for rival pheromones is crossed, the Mushroom Body Output Neuron valence balance triggers a lunge.
 
 ---
 
-## 🔬 ¿Por qué este enfoque?
+## 📸 Capabilities & Visual Showcase
 
-Los experimentos previos que intentaron conectar cerebros simulados a videojuegos (como *Doom* o *Super Mario 64*) se enfrentaron a tres problemas estructurales:
-1. **Espacios de control arbitrarios y discretos**, totalmente ajenos a la morfología de un insecto.
-2. **Recompensas dispersas y diferidas en el tiempo**, que requieren millones de episodios para cualquier plasticidad.
-3. **Imposibilidad de correr a escala masiva**: motores pesados que apenas alcanzan unos cientos de cuadros por segundo.
+### 1. Escape Reflex on the Intact Connectome (164,506 Neurons)
+When an opponent or hazard rushes in, the looming visual circuit fires lobula projection neurons `LC4` and `LPLC2` in tight temporal synchrony. This excitation converges monosinaptically onto the giant descending interneuron `DNp01` in the cervical connective, triggering an immediate escape maneuver.
 
-**FlyBrain resuelve esto invirtiendo el diseño:**
-El motor de combate fue concebido desde cero como una **función matemática pura en Rust**, determinista a nivel de bit, capaz de ejecutarse a más de **1.000.000 de pasos por segundo en Python** y de reproducirse a 60 FPS exactos en el navegador vía **WebAssembly**.
+<div align="center">
+  <img src="assets/conectoma-escape.png" alt="MaleCNS connectome showing LC4, LPLC2 and DNp01 firing" width="100%">
+  <p><em>Interactive 3D point cloud of 164,506 neurons in MaleCNS: cyan activation in the optic lobes and white action potential burst along descending giant fiber DNp01.</em></p>
+</div>
+
+### 2. Neuro-Lab: In Silico Optogenetics & 16-Step Neural Sequencer
+An interactive neuro-stimulation console allowing direct excitation of identified neural clusters (prothoracic motor neurons `T1-L` and `T1-R`, leg flexors `T2-T3`, wing flight motor `WINGS`, backward-walking interneuron `MDN Moonwalker`, and courtship/aggression interneurons `P1`) to examine real-time kinematic responses on the 3D Drosophila anatomical rig.
+
+<div align="center">
+  <img src="assets/neurolab.png" alt="Neuro-Lab with 16-step sequencer and 3D rig" width="100%">
+  <p><em>Neuro-Lab interface: 16-step motor pattern sequencer with adjustable tempo and live joint angle feedback.</em></p>
+</div>
+
+### 3. Attack Telegraphing & Decal Warning
+Adhering to high-skill action game design, every boss technique projects its upcoming area of effect on the ground via a dynamic decal during its windup frames, giving human players a tight 200 ms reaction window to dodge or seek cover.
+
+<div align="center">
+  <img src="assets/telegrafia.png" alt="Boss attack telegraph decal" width="90%">
+  <p><em>Lunge telegraph warning decal projected across the tabletop arena.</em></p>
+</div>
+
+### 4. Biomechanical Locomotion & Courtship Display
+Reproduction of rhythmic motor coordination (courtship song and gait) driven by frequency oscillators and real-time audio spectral analysis at 156.5 BPM.
+
+<div align="center">
+  <img src="assets/baile-cortejo.png" alt="Courtship and biomechanical locomotion" width="90%">
+  <p><em>Close-up kinematic inspection: unilateral wing vibration, leg extension, and thoracic motor neuron activation.</em></p>
+</div>
 
 ---
 
-## 🏗️ Cómo está armado
+## 🔬 Why This Approach?
+
+Recent viral projects connected fly connectomes to games like *Doom* or *Super Mario 64*. While inspiring, they face fundamental design mismatches:
+1. **Arbitrary, complex discrete controls** completely alien to insect physiology.
+2. **Extremely sparse and delayed reward signals**, requiring millions of trial-and-error runs for any emergence.
+3. **Severe performance bottlenecks**: heavyweight game engines unable to execute high-volume parallel simulations.
+
+**FlyBrain solves this by inverting the design:**
+The combat engine was engineered from scratch as a **pure mathematical function in Rust**. It is deterministic down to the single bit, runs headless at **over 1,000,000 steps per second in Python**, and replays identically at 60 FPS in any modern browser via **WebAssembly**.
+
+---
+
+## 🏗️ Architecture & Components
 
 ```
 FlyBrain/
-├── engine/        Rust. El motor de simulación física y combate.
-│   │              Función pura: sin I/O, sin hilos sueltos, sin estado global.
-│   ├── wasm32     → Compilado a WebAssembly para el navegador.
-│   └── pyo3       → Enlazado con Python como VecEnv paralelizado con Rayon.
-├── fly/           Python. La mosca biofísica:
-│   │              Conectoma MaleCNS en matrices dispersas CSR/CSC,
-│   │              simulador LIF vectorizado y bancos de validación empírica.
+├── engine/        Rust. Core physics, collisions, combat, and damage simulation.
+│   │              Pure function: no I/O, no global state, no uncontrolled randomness.
+│   ├── wasm32     → Compiled to WebAssembly for client-side replay & simulation.
+│   └── pyo3       → Python C-extensions exposing high-throughput VecEnv (Rayon).
+├── fly/           Python. The biophysical fly:
+│   │              MaleCNS connectome represented in sparse CSR/CSC matrices,
+│   │              vectorized LIF simulator, and empirical biological validation suites.
 ├── web/           TypeScript + Three.js.
-│   │              Visualización WebGL pura: arena isométrica, render 3D
-│   │              del conectoma, retina biológica y consola Neuro-Lab.
-├── assets/        Capturas reales de alta fidelidad para documentación.
-├── arenas/        Geometría declarativa de mapas en formato JSON.
-└── training/      Benchmarks de rendimiento y arnés para Python.
+│   │              Pure WebGL presentation layer: orthographic arena, 3D
+│   │              connectome visualizer, biological retina, and Neuro-Lab console.
+├── assets/        Production-grade screenshots and documentation media.
+├── arenas/        Declarative map geometry in JSON format.
+└── training/      VecEnv performance benchmarks and Python harnesses.
 ```
 
-### El Punto de Integración Unificado
+### The Unified Integration Boundary
 
-El motor no decide qué hace el boss: es un receptor pasivo de acciones:
+The engine does not decide what the boss does; it receives actions through a single clean entrypoint:
 
 ```rust
 pub fn step(w: &mut World, input: PlayerInput, action: BossAction) -> StepEvents
 ```
 
-Toda la comunicación de entrada y salida se realiza mediante estructuras compactas de ancho fijo:
+All interactions are packed into compact fixed-width structures:
 
-#### 1. Lo que el cerebro percibe (Observación egocéntrica de 43 dimensiones):
-* **16** raycasts por azimut: distancia euclidiana al obstáculo más cercano.
-* **2** línea de visión directa (*line of sight*): despejada o bloqueada y distancia al rival.
-* **10** cinemática del rival: posición y velocidad relativas, salud, fase y estados de invulnerabilidad.
-* **9** estado del boss: salud, enfriamiento de las 5 herramientas, fase y proximidad al borde.
-* **5** contexto global: tiempo transcurrido, inercia de daño y últimas 3 acciones del rival.
-* **1** señal de **looming**: tasa de expansión óptica en el campo visual ($\frac{2rv}{d^2}$), la entrada directa de `LC4` y `LPLC2`.
+#### 1. Sensory Input (43-Dimensional Egocentric Observation):
+* **16** Azimuth raycasts: Euclidean distance to the nearest static/dynamic obstacle.
+* **2** Direct line-of-sight (LOS): clear or obstructed, plus target distance.
+* **10** Opponent kinematics: relative position, velocity vector, health, action phase, and invulnerability frames.
+* **9** Boss self-state: health, cooldown timers for 5 tools, active phase, and arena boundary proximity.
+* **5** Global context: match clock, damage momentum, and opponent's last 3 actions.
+* **1** **Looming signal**: optical expansion rate of approaching threats ($\frac{2rv}{d^2}$), directly driving `LC4` and `LPLC2`.
 
-#### 2. Lo que el cerebro comanda (Cuantizado a 2 bytes):
-`Idle`, `Move(ángulo)`, `Use(herramienta, parámetro)` y `Deploy(apoyo, dirección)`. Cinco herramientas de combate: martillo, cañón, onda de choque, embestida y esquiva.
+#### 2. Motor Output (Quantized to 2 Bytes):
+`Idle`, `Move(angle)`, `Use(tool, param)`, and `Deploy(support, direction)`. Arsenal includes hammer, cannon, shockwave, dash lunge, and dodge roll.
 
-#### 3. Señal de Refuerzo Densa (para Plasticidad y Dopamina):
-$$r = +0.01 \cdot \text{daño\_infligido} - 0.001 \cdot \text{daño\_recibido} - 0.05 \cdot \text{whiff} - 0.0005 \cdot \text{pasividad}$$
+#### 3. Dense Reinforcement Gradient (Dopaminergic Modulation):
+$$r = +0.01 \cdot \text{damage\_dealt} - 0.001 \cdot \text{damage\_taken} - 0.05 \cdot \text{whiff} - 0.0005 \cdot \text{passivity}$$
 
-El término *whiff* (atacar al aire sin conectar) provee un gradiente inmediato para distinguir apuntar de disparar a ciegas, conectado biológicamente a las neuronas dopaminérgicas `PPL1` y `PAM`.
+The *whiff* penalty (attacking open air without making contact) provides an immediate credit assignment signal that separates aiming from blind aggression, biologically mapped to dopaminergic inputs `PPL1` and `PAM`.
 
 ---
 
-## 🔒 Determinismo Bit a Bit
+## 🔒 Bit-for-Bit Determinism
 
-Una sesión de combate simulada en una GPU remota debe reproducirse en el navegador **idéntica bit por bit**, o cualquier análisis neurológico pierde validez. Esto se garantiza mediante tres pilares:
+A fight simulated across millions of steps on a remote GPU cluster must reproduce in the browser **bit-by-bit identical**, otherwise replay verification and neural causality break down. This invariant is enforced by three core rules:
 
-1. **`libm` estricto:** `sin`, `cos`, `atan2` y `exp` se evalúan mediante la implementación pura de software de `libm`, evitando las diferencias de precisión entre las FPU de x86 y los entornos WebAssembly.
-2. **Generador Pseudoaleatorio PCG32 propio:** Algoritmo determinista autocontenido en [`engine/src/rng.rs`](engine/src/rng.rs), independiente de dependencias externas que puedan alterar sus secuencias entre versiones.
-3. **Paso temporal fijo:** Integración a $dt = \frac{1}{60}\text{ s}$ constante sin saltos de tiempo flotante.
+1. **Strict `libm` usage:** Trigonometric and transcendental operations (`sin`, `cos`, `atan2`, `exp`) use software-implemented `libm` routines instead of native `f32` methods, eliminating hardware FPU drift between x86 and WebAssembly.
+2. **Self-contained PCG32 PRNG:** Custom pseudo-random generator in [`engine/src/rng.rs`](engine/src/rng.rs), isolating runs from external crate updates.
+3. **Fixed-step integration:** Strict $dt = \frac{1}{60}\text{ s}$ tick cadence without floating time deltas.
 
-La suite de verificación comprueba esta invariante de forma automática:
+The verification test suite validates this invariant automatically:
 ```bash
-cargo test                        # 114 pruebas unitarias y de integración
-./scripts/wasm-determinism.sh     # Compara hashes criptográficos nativo vs wasm
-node scripts/wasm-smoke.mjs       # Valida la capa de interoperabilidad JS/WASM
-cd web && npm run check           # Compilación y prueba gráfica con headless browser
+cargo test                        # 114 unit and integration tests
+./scripts/wasm-determinism.sh     # Asserts identical crypto-hashes: Native vs WASM
+node scripts/wasm-smoke.mjs       # Verifies browser binding serialization
+cd web && npm run check           # Headless browser WebGL and combat execution test
 ```
 
 ---
 
-## 🎮 Modos Interactivos en el Navegador
+## 🎮 Interactive Web Modes
 
-Iniciando el servidor de desarrollo (`./scripts/dev.sh`), se puede acceder a las distintas facetas del proyecto:
+Launch the local development server with `./scripts/dev.sh` to explore all interfaces:
 
-* **`/?modo=replay&pelea=fight_0` (Modo Combate / Repetición):**  
-  Reproduce batallas grabadas con sincronización cuadro a cuadro entre la física del motor, la cámara WebGL, el mapa de omatidios y las descargas neuronales del conectoma.
+* **`/?modo=replay&pelea=fight_0` (Combat Replay Mode):**  
+  Replays recorded battles frame-by-frame with precise synchronization between physics, WebGL rendering, the ommatidia compound eye, and connectome spike activity.
 * **`/?modo=neuro` (Neuro-Lab):**  
-  Laboratorio optogenético interactivo con interfaz de secuenciador por pasos (16 steps). Permite componer secuencias de pulsos neuronales y estudiar la motricidad resultante en el cuerpo de la mosca.
-* **`/?modo=mantis` (Minijuego de Sigilo Mantis):**  
-  Toma el control del sujeto e intenta acechar al espécimen por la espalda. Si te mueves demasiado rápido o de frente, la expansión óptica superará el umbral de `LC4/LPLC2` y la mosca escapará volando en milisegundos.
-* **`/?modo=baile` (Cortejo y Locomoción):**  
-  Demostración visual con acompañamiento musical rítmico a 156.5 BPM que ilustra la coordinación de extremidades bilaterales y patrones de aleteo.
+  Interactive optogenetics playground featuring a 16-step rhythm sequencer. Craft neural spike trains and observe their biomechanical expression on the anatomical rig.
+* **`/?modo=mantis` (Mantis Stealth Stalking):**  
+  Player stealth challenge. Sneak up on the fly from behind. If your approach speed or angle generates an optical looming rate exceeding the `LC4/LPLC2` firing threshold, the giant fiber fires and the fly escapes within milliseconds.
+* **`/?modo=baile` (Courtship & Locomotion):**  
+  Audio-reactive showcase set to 156.5 BPM illustrating bilateral leg coordination and wing display routines.
 
 ---
 
-## 🧠 Neurobiología Conectada y Validada
+## 🧠 Validated Neurobiology & Circuits
 
-El proyecto extrae subredes funcionales de **MaleCNS v1.0** e integra el simulador LIF con los siguientes parámetros biofísicos:
+FlyBrain extracts functional subgraphs from **MaleCNS v1.0** and runs the LIF simulator under biologically grounded operating regimes:
 
 ```
-Ruido basal:       1.5 - 2.0 (mantiene la red silente en reposo sin convulsión)
-Escala sináptica:  0.01 - 0.07 (franja meseta que evita la inhibición recurrente global)
-Integración LIF:   dt = 0.1 ms (~167 pasos de simulación celular por cada tick de juego)
+Baseline Noise:    1.5 - 2.0 (ensures spontaneous silence in resting state without runaway seizure)
+Synaptic Scale:    0.01 - 0.07 (plateau regime preventing recurrent inhibition wash-out)
+LIF Integration:   dt = 0.1 ms (~167 biophysical solver steps per 60Hz game tick)
 ```
 
-### Circuitos y Literatura Científica
-- **Detección de Looming y Escape:** Neuronas `LC4` y `LPLC2` que proyectan monosinápticamente a la neurona gigante `DNp01` (*Giant Fiber*), descritas en *von Reyn et al. (2014)* y *Ache et al. (2019)*.
-- **Coordinación de Marcha y Motoneuronas:** 381 motoneuronas del VNC conectadas a las seis patas (coxa, fémur, tibia) inspiradas en el modelo de *Pugliese et al. (2025)*.
-- **Olfato, Feromonas y Agresión:** Vía sensorial de la feromona cVA (11-cis-vaccenyl acetate) a través del glomérulo `DA1` hacia las *Kenyon Cells* del cuerpo pedunculado (*Wang & Anderson, 2010*).
-- **Plasticidad Sináptica Dopaminérgica:** Depresión heterosináptica $KC \to MBON$ mediada por compartimentos dopaminérgicos `PAM` y `PPL1` (*Aso et al., 2014*).
+### Key Circuits & Literature Foundations
+- **Looming Detection & Escape:** Lobula columnar neurons `LC4` and `LPLC2` projecting monosynaptically to descending Giant Fiber `DNp01` (*von Reyn et al., 2014*; *Ache et al., 2019*).
+- **Walking Coordination & Motor Neurons:** 381 motor neurons in the ventral nerve cord driving six articulated legs (coxa, femur, tibia) based on *Pugliese et al. (2025)*.
+- **Olfaction & Aggression Drive:** 11-cis-vaccenyl acetate (cVA) pheromone sensory pathway via antenna lobe glomerulus `DA1` projecting to mushroom body Kenyon Cells (*Wang & Anderson, 2010*).
+- **Dopaminergic Synaptic Plasticity:** Heterosynaptic depression of $KC \to MBON$ synapses modulated by dopaminergic clusters `PAM` and `PPL1` (*Aso et al., 2014*).
 
 ---
 
-## 🚀 Arrancar en 3 Minutos
+## 🚀 Quickstart in 3 Minutes
 
-### Prerrequisitos
-- **Rust** 1.80 o superior (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
-- **Node.js** 20+ y `npm`
-- **Python** 3.10+ (opcional, para experimentos con el conectoma)
+### Prerequisites
+- **Rust** 1.80+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+- **Node.js** 20+ and `npm`
+- **Python** 3.10+ (optional, for connectome experiments)
 
-### 1. Probar el Motor en Rust
+### 1. Test the Simulation Engine (Rust)
 ```bash
 cargo test
 ```
 
-### 2. Levantar la Aplicación Web (Combate, Neuro-Lab y Conectoma)
+### 2. Launch the Web Application (Combat, Neuro-Lab & Connectome)
 ```bash
 ./scripts/dev.sh
-# Abre http://localhost:5173 en tu navegador
+# Open http://localhost:5173 in your browser
 ```
 
-### 3. Descargar el Conectoma y Correr Experimentos Biofísicos (Python)
+### 3. Download Connectome & Run Biophysical Experiments (Python)
 ```bash
-# Descarga los pesos del conectoma MaleCNS (540 MB, bucket público de Janelia)
+# Download MaleCNS dataset (540 MB, public Janelia bucket)
 python fly/paso0.py --descargar
 
-# Experimento del reflejo de escape (looming -> fibra gigante)
+# Validate the escape reflex (visual looming -> giant fiber)
 python fly/sobresalto.py
 
-# Benchmark del entorno vectorizado en Python
+# Benchmark vectorized Python environment throughput
 pip install maturin && maturin develop --release
 python training/env_smoke.py
 ```
 
 ---
 
-## 🌐 English Overview
+## 📜 Credits & License
 
-**FlyBrain** is an open-source experimental platform connecting a biologically intact connectome simulation of *Drosophila melanogaster* (MaleCNS v1.0, ~165,000 neurons) to a high-speed video game boss combat engine.
-
-- **No Artificial Policies:** Movement, dodging, and attack drives emerge from biological circuits (visual looming detection via `LC4`/`LPLC2` $\to$ Giant Fiber `DNp01`, ventral nerve cord leg motor neurons, and mushroom body valence balancing).
-- **Pure Functional Engine:** Written in Rust, fully deterministic down to the bit between native x86 and WebAssembly targets using pure-software `libm` and custom PCG32 pseudo-random number generators.
-- **Ultra-High Throughput:** Vectorized headless Python environment benchmarking at **>1,000,000 steps per second**.
-- **Interactive Three.js Client:** Live 3D point cloud visualization of 164,506 neurons, ommatidia retinal projection, and an interactive 16-step optogenetic neuro-sequencer.
-
----
-
-## 📜 Créditos y Licencia
-
-- **Motor y Simulación:** Desarrollado por [Jhongdlp](https://github.com/Jhongdlp). Basado en la arquitectura central de [EPOCH](https://github.com/Jhongdlp/EPOCH).
-- **Dataset del Conectoma:** MaleCNS v1.0 provisto por **Janelia Research Campus / FlyEM Project Team** bajo licencia **CC-BY 4.0**.
-- **Licencia de Código:** Publicado bajo la licencia de código abierto **MIT** (ver [`LICENSE`](LICENSE)).
+- **Engine & Architecture:** Created by [Jhongdlp](https://github.com/Jhongdlp), adapted from the core engine of [EPOCH](https://github.com/Jhongdlp/EPOCH).
+- **Connectome Dataset:** MaleCNS v1.0 courtesy of **Janelia Research Campus / FlyEM Project Team** under **CC-BY 4.0**.
+- **Code License:** Open source under the **MIT License** (see [`LICENSE`](LICENSE)).
