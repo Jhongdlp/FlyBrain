@@ -102,6 +102,8 @@ function bloque(w: number, h: number, d: number, mat: THREE.Material) {
 
 export class Mesa {
   private pino = tinta(PINO, { map: vetas() });
+  private madera = tinta(MADERA, { map: vetas() });
+  private grupoParedes = new THREE.Group();
 
   constructor(escena: THREE.Scene, ancho: number, alto: number, estaticos: Estatico[]) {
     const centro = new THREE.Vector3(ancho / 2, 0, alto / 2);
@@ -126,7 +128,7 @@ export class Mesa {
     relleno.position.set(centro.x + 20, 14, centro.z + 16);
     escena.add(sol, sol.target, relleno, new THREE.AmbientLight(0x5a6a8c, 1.35));
 
-    const madera = tinta(MADERA, { map: vetas() });
+    const madera = this.madera;
 
     // La mesa de afuera, en penumbra: la bandeja es el escenario.
     const vetasMesa = vetas();
@@ -161,15 +163,9 @@ export class Mesa {
     fondo.receiveShadow = true;
     escena.add(fondo);
 
-    // Las paredes de adentro, de la misma madera. Se modelan a lo largo de X
-    // y se giran si van en Z, para que la veta corra a lo largo.
-    for (const e of estaticos) {
-      const enX = e.hx >= e.hy;
-      const m = bloque(Math.max(e.hx, e.hy) * 2, ALTURA_MURO, Math.min(e.hx, e.hy) * 2, madera);
-      m.position.set(e.x, ALTURA_MURO / 2, e.y);
-      if (!enX) m.rotation.y = Math.PI / 2;
-      escena.add(m);
-    }
+    // Las paredes interiores dinámicas en su propio grupo
+    escena.add(this.grupoParedes);
+    this.actualizarEstaticos(estaticos);
 
     // Unas migas por el mantel, lejos de las paredes: dan la escala sin
     // ensuciar nada que importe.
@@ -196,5 +192,19 @@ export class Mesa {
     const m = bloque(1, 1, 1, this.pino);
     m.position.y = 0;
     return m;
+  }
+
+  /** Actualiza los muros estáticos según la arena actual. */
+  actualizarEstaticos(estaticos: Estatico[]) {
+    while (this.grupoParedes.children.length > 0) {
+      this.grupoParedes.remove(this.grupoParedes.children[0]);
+    }
+    for (const e of estaticos) {
+      const enX = e.hx >= e.hy;
+      const m = bloque(Math.max(e.hx, e.hy) * 2, ALTURA_MURO, Math.min(e.hx, e.hy) * 2, this.madera);
+      m.position.set(e.x, ALTURA_MURO / 2, e.y);
+      if (!enX) m.rotation.y = Math.PI / 2;
+      this.grupoParedes.add(m);
+    }
   }
 }

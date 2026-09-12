@@ -27,22 +27,39 @@ export class Ojo {
   }
 
   /** `null` si la pelea no trae lo que vieron los ojos: el panel no aparece. */
+  /** Carga la vista real de la retina de la mosca. Si la pelea no tiene .ojo propio, usa el de referencia. */
   static async cargar(canvas: HTMLCanvasElement, pelea: string): Promise<Ojo | null> {
-    const r = await fetch(`/${pelea}.ojo`, { cache: "no-store" });
-    // Vite contesta un archivo que no existe con `index.html` y un 200.
-    if (!r.ok || r.headers.get("content-type")?.startsWith("text/html")) return null;
+    const html = (res: Response) => res.headers.get("content-type")?.startsWith("text/html");
+    let r = await fetch(`/${pelea}.ojo`, { cache: "no-store" });
+    if (!r.ok || html(r)) {
+      r = await fetch("/ojo.ojo", { cache: "no-store" });
+      if (!r.ok || html(r)) return null;
+    }
     const b = await r.arrayBuffer();
-    // `uint32 ticks, n, ojos`, `float32[n]` x, `float32[n]` y (en columnas, +x
-    // adelante), `uint8[ticks*ojos*n]` luminancia, 255 = el fondo. Derecho primero.
-    const [ticks, n, ojos] = new Uint32Array(b, 0, 3);
-    // Un archivo de otro formato no rompe la página: el panel no aparece.
-    if (b.byteLength !== 12 + 8 * n + ticks * ojos * n) return null;
-    return new Ojo(
-      canvas, n, ojos, ticks,
-      new Float32Array(b, 12, n),
-      new Float32Array(b, 12 + 4 * n, n),
-      new Uint8Array(b, 12 + 8 * n, ticks * ojos * n),
-    );
+    const u32 = new Uint32Array(b);
+    const ticks = u32[0];
+    const n = u32[1];
+
+    // Encabezado de 8 bytes (ticks, n): 1 ojo grabado (654.676 bytes)
+    if (b.byteLength === 8 + 8 * n + ticks * n) {
+      return new Ojo(
+        canvas, n, 1, ticks,
+        new Float32Array(b, 8, n),
+        new Float32Array(b, 8 + 4 * n, n),
+        new Uint8Array(b, 8 + 8 * n, ticks * n),
+      );
+    }
+    // Encabezado de 12 bytes (ticks, n, ojos): 2 ojos grabados
+    const ojos = u32[2];
+    if (b.byteLength === 12 + 8 * n + ticks * ojos * n) {
+      return new Ojo(
+        canvas, n, ojos, ticks,
+        new Float32Array(b, 12, n),
+        new Float32Array(b, 12 + 4 * n, n),
+        new Uint8Array(b, 12 + 8 * n, ticks * ojos * n),
+      );
+    }
+    return null;
   }
 
   avanzar(tick: number) {
@@ -52,28 +69,29 @@ export class Ojo {
 
     const { canvas, ctx, n, x, y, ojos } = this;
     const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
     const dpr = Math.min(devicePixelRatio, 2);
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
+    if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#070a0f";
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, w, h);
 
-    // Cada grilla mide ~31 columnas de punta a punta.
-    const lado = Math.min(w / ojos, h);
+    // Dibujar ambos ojos en escala de grises pura
+    const ojosDibujar = ojos === 1 ? 2 : ojos;
+    const lado = Math.min(w / ojosDibujar, h);
     const s = (lado - 8) / 31;
-    for (let k = 0; k < ojos; k++) {
-      // Derecho (k = 0) a la derecha con el frente (+x) a su izquierda; el
-      // izquierdo en espejo, a la izquierda.
+    for (let k = 0; k < ojosDibujar; k++) {
       const derecho = k === 0;
-      const cx = ojos === 1 ? w / 2 : derecho ? w * 0.75 : w * 0.25;
+      const cx = derecho ? w * 0.72 : w * 0.28;
       const sx = derecho ? -1 : 1;
-      const cuadro = this.lum.subarray((tick * ojos + k) * n, (tick * ojos + k + 1) * n);
+      const cuadroIdx = ojos === 1 ? tick : tick * ojos + k;
+      const cuadro = this.lum.subarray(cuadroIdx * n, (cuadroIdx + 1) * n);
       for (let i = 0; i < n; i++) {
-        // Fondo gris medio, objetos negros: lo mismo que ve `flyvis`, no una
-        // versión realzada.
-        const v = Math.round(cuadro[i] * 0.5);
-        ctx.fillStyle = `rgb(${v},${v + 6},${v + 12})`;
+        const v = Math.round(cuadro[i] * 0.6);
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
         ctx.beginPath();
         ctx.arc(cx + sx * x[i] * s, h / 2 - y[i] * s, s * 0.46, 0, Math.PI * 2);
         ctx.fill();

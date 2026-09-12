@@ -54,8 +54,25 @@ def _dentro(px, py, muros, extra):
             (np.abs(py[:, None] - cy) <= hy + extra)).any(axis=1)
 
 
+# Lo que tarda en reaccionar a una telegrafía, en ticks: 200 ms, el tiempo de
+# reacción de una persona. La embestida del boss avisa 22 ticks antes de salir
+# (`weapons::frames`), así que le queda margen justo, como a un jugador.
+REACCION = 12
+# La fase del boss dentro de la observación: 16 rayos + 2 de línea de visión + 10
+# del jugador, y dentro del bloque del boss, después de la vida y los cinco
+# enfriamientos (`python.rs::observe`). 0.25 es windup.
+FASE_BOSS = 16 + 2 + 10 + 1 + 5
+
+
 class Oponente:
-    def __init__(self, semilla=0, arena=0):
+    def __init__(self, semilla=0, arena=0, esquiva=0.0):
+        """`esquiva`: con qué probabilidad esquiva un ataque telegrafiado del
+        boss. En 0 —el valor de los experimentos viejos— se come todo, que es lo
+        que vuelve imbatible a un boss que aprende a apuntar. Es el jugador, no
+        una regla del juego: por eso vive acá y no en el motor."""
+        self.esquiva = esquiva
+        self._decidido = None
+        self._rng = np.random.default_rng(semilla + 7)
         a = json.loads((ARENAS / ARCHIVO[arena]).read_text())
         self.w, self.h = a["size"]
         # `reshape`: en la arena abierta la lista viene vacía, y un array vacío
@@ -148,10 +165,38 @@ class Oponente:
                     cola.append(n)
         return []
 
+    def _esquivar(self, obs, px, py, bx, by, d) -> int | None:
+        """Si el boss está telegrafiando un ataque, apartarse de la línea.
+
+        La fase del boss está en la observación —la misma que ve el cerebro— y en
+        pantalla es la telegrafía del decal. Se decide una sola vez por ataque, y
+        se ejecuta `REACCION` ticks después de verlo: un jugador tampoco reacciona
+        en el mismo frame.
+        """
+        windup = obs[FASE_BOSS] == 0.25 and d < 9.0
+        if not windup:
+            self._decidido = None
+            return None
+        if self._decidido is None:
+            self._decidido = [self._rng.random() < self.esquiva, 0]
+        self._decidido[1] += 1
+        if not self._decidido[0] or self._decidido[1] != REACCION:
+            return None
+        # De costado a la línea del ataque, hacia el lado con más sitio.
+        ang = np.arctan2(py - by, px - bx) + np.pi / 2
+        lejos = np.hypot(px + np.cos(ang) - bx, py + np.sin(ang) - by)
+        if lejos < d:
+            ang += np.pi
+        return (2 << 4) | 0x08 | (int(round(ang / TAU * 8)) % 8)  # Dodge + dirección
+
     def __call__(self, w, obs) -> int:
         """El byte del jugador para este tick, empaquetado como en `log.rs`."""
         px, py, bx, by = float(w[0]), float(w[1]), float(w[4]), float(w[5])
         d = np.hypot(bx - px, by - py)
+        if self.esquiva:
+            byte = self._esquivar(obs, px, py, bx, by, d)
+            if byte is not None:
+                return byte
         # Las dos condiciones: el motor dice que hay visión, y el tubo del
         # proyectil está despejado. Ninguna alcanza sola.
         tiro = obs[engine.IDX_LOS] > 0.5 and self._despejado(px, py, bx, by, MARGEN_TIRO)[0]

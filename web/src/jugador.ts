@@ -185,7 +185,7 @@ export class Jugador {
   private vuelta = new THREE.Quaternion();
   private v = new THREE.Vector3();
 
-  constructor(escena: THREE.Scene, private efectos: Efectos, private color: number) {
+  constructor(escena: THREE.Scene, private efectos: Efectos, _color: number) {
     const cuerpo = tinta(CUERPO, { emissive: 0xffffff, emissiveIntensity: 0 });
     const pata = tinta(PATA, { emissive: 0xffffff, emissiveIntensity: 0 });
     const quela = tinta(QUELA, { emissive: 0xffffff, emissiveIntensity: 0 });

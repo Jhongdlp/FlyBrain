@@ -667,3 +667,203 @@ chico. Se ve en el navegador en `?pelea=espinal`.
   articulaciones y marcha.
 - **Las alas**: 67 motoneuronas de ala, con los músculos de potencia (DLM, DVM).
   Con la red encendida disparan a 40-60 Hz, sin que nada lo pida.
+
+## El ataque: la mosca embiste, y la dopamina la envalentona
+
+`ataque.py`. La tercera acción del boss, y la primera que **cambia con lo que le
+pasa**. El circuito entero sale del conectoma:
+
+```
+olor del rival (cVA) → ORN_DA1 → DA1_lPN → células de Kenyon
+KC → MBON, y la balanza de valencia decide: acercarse o evitar
+acertar → PAM (recompensa) ┐ deprimen KC→MBON del compartimento
+recibir daño → PPL1 (castigo) ┘ que les toca, y la balanza se corre
+```
+
+**Por qué el olor.** Un macho de *Drosophila* reconoce a otro macho por la cVA,
+su feromona, y eso promueve agresión (Wang y Anderson 2010). La vía está entera
+en estos datos: 204 ORN_DA1 → 13 DA1_lPN → células de Kenyon, con 10.519
+sinapsis, una de las entradas más fuertes al cuerpo pedunculado. Que la
+concentración caiga con la distancia lo pone el motor, igual que el looming.
+
+**Por qué la lectura son las MBON.** No fue la primera opción: las dos vías más
+obvias se probaron y ninguna sobrevive al LIF.
+
+| vía | medido | veredicto |
+|---|---|---|
+| pC1/aIPg → descendentes | estimular las neuronas de agresión del macho dispara DNp68, DNg74_a, DNg86 a 40x sobre el control | pasa |
+| olor → pC1/aIPg | 0,81 Hz con cVA contra 0,70 del control | **no**: la entrada no llega a la agresión |
+| KC→MBON → descendentes | deprimirlas al máximo (x0,1) mueve las descendentes ±2 disparos | **no**: es ruido |
+
+Así que la salida se lee donde sí hay señal, con la valencia publicada (Aso et
+al. 2014): las MBON de compartimentos PPL1 empujan a acercarse, las de
+compartimentos PAM a evitar, y la balanza entre las dos es la decisión. Es el
+mismo tipo de mapeo que DNp01 → esquiva: la neurona es real y su función está
+descrita; el botón del juego lo elegimos nosotros.
+
+### El régimen importa más que el circuito
+
+Esto es lo que costó encontrar, y vale para cualquier vía sensorial que se
+intente después. **Con el ruido de fondo en 2,0 —el de `sobresalto.py`— la red
+se enciende sola.** No al arrancar: a los pocos segundos de simulación continua
+queda a ~3 Hz de fondo, y en ese estado:
+
+- las interneuronas del lóbulo antenal (lLN1_bc y compañía) son de las que más
+  disparan, y **cierran el olfato**: las PN del glomérulo DA1 quedan a 0 Hz
+  aunque se les inyecte corriente directa;
+- las KC ya están al 3% por actividad de fondo, así que el olor no cambia nada;
+- la balanza queda plana a cualquier distancia, y la dopamina no la mueve.
+
+Con ruido 1,5 la red **no** se enciende (0 Hz de fondo) y el olfato pasa: las KC
+van del 0% al 2,9% con el olor. Por eso esta mosca corre a 1,5.
+
+Los experimentos viejos no lo veían porque miden con la red recién nacida.
+
+**El precio, medido.** En ese régimen la fibra gigante dispara de más con la
+ganancia de looming calibrada para el ruido 2,0. En lazo abierto, sobre la misma
+traza:
+
+```
+ruido   GF dispara   precisión   cobertura   lift
+2,0       42 ticks      88%         41%      8,8x
+1,5      237 ticks      33%         87%      3,3x
+```
+
+Sigue pasando el criterio de `piloto.py` (lift ≥ 3), pero esquiva cuando no hace
+falta. **Pendiente: rebarrer la ganancia con ruido 1,5**, como se barrió en su
+día con 2,0.
+
+### La balanza dice dónde está el rival
+
+Medido en pelea, con la mosca corriendo entera (esquiva, patas, olfato):
+
+```
+distancia   KC activas   balanza (disparos por 100 ms)
+> 12            0,0%      0,0 ± 0,0
+8 - 12          0,9%     +10,6 ± 15,7
+5 - 8           2,9%     +36,0 ± 2,3
+0 - 5           2,9%     +35,7 ± 2,6
+```
+
+Sin rival a la vista el cuerpo pedunculado está mudo y la mosca no ataca. Con el
+rival encima la balanza es inequívoca. Y entre 8 y 12 **titubea**: ahí es donde
+la dopamina tiene algo que corregir.
+
+El umbral para embestir son tres sigmas del ruido de su propia balanza, medidos
+en los 90 ticks que la mosca pasa sola antes de la pelea. No es una perilla de
+cuánto ataca: es dónde termina su ruido.
+
+### La dopamina la envalentona
+
+Pareando cuatro veces el olor del rival con un pulso de recompensa en las PAM, y
+midiendo la balanza antes y después:
+
+```
+                           balanza antes → después
+recompensa (PAM)              +4,9 → +80,8
+castigo (PPL1)                +4,9 → +32,7
+nada (el control)             +4,9 → +34,3
+```
+
+La recompensa sube la balanza muy por encima del control; el castigo, apenas por
+debajo. O sea: **acertar la vuelve más lanzada**, que es exactamente lo que hace
+una depresión de KC→MBON en los compartimentos de recompensa — las MBON que
+empujan a evitar dejan de empujar.
+
+Dos números de la regla, medidos y no elegidos a gusto: `dopamina.MARGEN`
+descarta hasta 2 disparos por tick y por DAN como ruido, y con la corriente del
+dolor de las paredes (3,0) las PAM dan 1,6 disparos por tick — o sea nada. Con
+10,0 dan 3,8, y seis ticks de eso deprimen a la mitad las sinapsis elegibles: la
+mosca aprende de un golpe, que es como aprende una mosca.
+
+### En pelea: se atreve más, pero no acierta más
+
+`python fly/ataque.py`. La misma mosca pelea dos veces seguidas conservando lo
+aprendido, contra la misma sin plasticidad —los pulsos de dopamina entran igual,
+pero ninguna sinapsis cambia—, con el oponente esquivando la mitad de las
+telegrafías:
+
+```
+                  pelea  ataques  golpes  acierto  distancia  balanza  KC→MBON
+dopamina            1       3        1      33%       4,7       4,8     0,976
+dopamina            2       6        1      17%       6,8      13,1     0,957
+sin plasticidad     1       3        2      67%       5,8       4,6     1,000
+sin plasticidad     2       6        1      17%       7,4       6,1     1,000
+```
+
+**El control lo mata, y hay que decirlo.** Entre la primera pelea y la segunda
+la mosca pasa de 3 a 6 embestidas y de 4,7 a 6,8 unidades de distancia — pero la
+mosca **sin plasticidad hace exactamente lo mismo**. Ese envalentonamiento es de
+la pelea (otra semilla, otro oponente, otras distancias), no de la dopamina.
+
+Lo único que sí separa a las dos es la balanza: 13,1 contra 6,1. La dopamina
+mueve el cuerpo pedunculado —se ve acá y se ve en el pareado controlado de más
+arriba— pero con el umbral donde está, **esa diferencia no cambia ninguna
+decisión**: cuando el rival está cerca la balanza ya está muy por encima del
+umbral, y moverla más no agrega ataques.
+
+Dos peleas de 900 ticks son 3 a 6 embestidas cada una. Con esa resolución no se
+puede afirmar nada del acierto: haría falta pelear mucho más, y es lo que sigue.
+
+**Es jugable.** Contra un jugador que no esquiva ninguna telegrafía, el boss le
+saca 52 de 100 en 15 segundos: el techo lo pone el motor (la embestida se enfría
+300 ticks y avisa 22 antes de salir), no la mosca. Con el jugador esquivando la
+mitad, 26. El oponente esquiva con 200 ms de reacción (`oponente.Oponente(
+esquiva=...)`), que es lo que hace una persona mirando el decal.
+
+### Lo que falta
+
+- **Más peleas.** El acierto con 3-6 ataques por pelea no mide nada. Con el LIF
+  a ~240 ms por tick, una tanda seria son horas: es donde entra la GPU.
+- **Que la balanza decida en el margen.** Hoy el umbral está tan por debajo de
+  la balanza con el rival cerca que la dopamina no puede cambiar la decisión.
+  Lo que hay que probar es la franja de 8 a 12 unidades, donde la balanza
+  titubea, con peleas que pasen tiempo ahí.
+- **La ganancia del looming en ruido 1,5** (ver arriba).
+- **Girar hacia el rival sin geometría.** Es la misma deuda que `piloto.virar`.
+
+### El miedo no se aprende acá: la asimetría de las MBON
+
+Se vio jugando: la mosca rodeaba al rival y embestía sin ninguna cautela, y
+pegarle no la corregía. El porqué está medido. Pareando el olor del rival con
+cada dopamina y mirando los dos grupos de MBON por separado:
+
+```
+                MBON acercarse   MBON evitar    pesos KC→acercarse / KC→evitar
+nada (control)   12,8 → 12,8      7,0 → 7,0          0,997 / 1,000
+recompensa       12,8 → 14,2      7,0 → 0,7          0,996 / 0,962
+castigo          12,8 → 12,2      7,0 → 7,0          0,986 / 1,000
+castigo x3       12,8 → 12,3      7,0 → 6,2          0,979 / 1,000
+```
+
+Las MBON de **evitar** viven de las células de Kenyon: deprimir sus sinapsis un
+4% las apaga casi del todo (7,0 → 0,7), y por eso la recompensa envalentona
+tanto. Las de **acercarse** casi no dependen de ellas —ya se veía en que
+deprimirlas al máximo solo las baja un 12%—, así que **el castigo no tiene
+palanca**: por más dopamina de castigo que entre, la balanza no baja.
+
+Es una asimetría de esta red, no de la mosca, y marca el límite honesto de lo
+que la plasticidad puede hacer acá: **solo sabe envalentonar**.
+
+**De dónde sale la cautela entonces.** Del golpe, no del aprendizaje: cuando la
+lastiman, el porrazo entra por los sensores táctiles de las patas del lado del
+que vino —la única vía sensorial que sobrevivió al LIF (`patas.py`)— y la
+aparta, como una pared. Y el rumbo solo persigue al olor mientras la balanza
+dice acercarse; si no llega al umbral, la mosca camina con sus patas en vez de
+rondar al rival.
+
+**Y cuánto de eso es el tacto.** Midiendo la distancia al rival antes y después
+de cada golpe recibido, en la misma pelea:
+
+```
+                                   distancia antes → después   pegada al rival (<5)
+sin porrazo (solo dopamina)              4,0 → 1,9                    58%
+con porrazo en las patas                 4,2 → 2,9                    50%
+con porrazo + retirada mecánica          6,3 → 6,1                     8%
+```
+
+El tacto **hace algo** —cierra 1 unidad menos después de cada golpe— pero no
+aleja a nadie: es el mismo empujón flojo que en `patas.py` la aparta de las
+paredes por poco. La cautela que se ve en pantalla es la retirada mecánica, y
+está marcada como deuda junto a la persecución: las dos se van el día que una
+vía del conectoma oriente a la mosca.

@@ -12,6 +12,8 @@ const DIST = "dist";
 const TIPOS = {
   ".html": "text/html", ".js": "text/javascript",
   ".wasm": "application/wasm", ".css": "text/css",
+  ".bin": "application/octet-stream", ".act": "application/octet-stream",
+  ".ojo": "application/octet-stream", ".mp3": "audio/mpeg",
 };
 
 const server = createServer(async (req, res) => {
@@ -28,7 +30,7 @@ const server = createServer(async (req, res) => {
   }
 });
 await new Promise((r) => server.listen(0, r));
-const url = `http://localhost:${server.address().port}/`;
+const url = `http://localhost:${server.address().port}/?modo=replay&pelea=fight_0`;
 
 const browser = await chromium.launch({
   args: ["--use-gl=swiftshader", "--enable-unsafe-swiftshader"],
@@ -71,10 +73,10 @@ await capturar("pantalla.png");
 
 // La telegrafía es obligatoria por diseño, así que se verifica: se espera a que
 // el boss esté cargando y se captura ahí. Si el decal no se dibujara, la
-// captura lo mostraría vacío.
 let capturada = false;
 for (let i = 0; i < 240 && !capturada; i++) {
-  if ((await page.textContent("#tel"))?.includes("cargando")) {
+  const telText = await page.textContent("#tel");
+  if (telText?.includes("cargando") || telText?.includes("charging")) {
     await capturar("pantalla-telegrafia.png");
     capturada = true;
   } else {

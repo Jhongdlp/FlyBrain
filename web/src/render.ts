@@ -13,8 +13,9 @@ import { Balas } from "./balas";
 import { Efectos } from "./efectos";
 import { ALTURA_DISPARO, Jugador } from "./jugador";
 import { ALTURA_MURO, Mesa } from "./mesa";
-import { Mosca } from "./mosca";
+import { Mosca, InfoBaile } from "./mosca";
 import { contorno } from "./tinta";
+import type { CanalesEstimulacion } from "./cerebro";
 
 // **Un solo color reservado para el peligro.** No se usa para nada más: ni
 // suelo, ni boss, ni UI, ni un objeto de la mesa. Cuando aparece significa una
@@ -111,9 +112,20 @@ export class Render {
     new ResizeObserver(() => this.encuadrar()).observe(contenedor);
   }
 
+  /** Actualiza las paredes de la mesa según los estáticos de la pelea cargada. */
+  actualizarEstaticos(estaticos: Estatico[]) {
+    this.mesa.actualizarEstaticos(estaticos);
+  }
+
+  private modoBaile = false;
+
   /** Inclinación de 60°: más bajo y las columnas tapan al jugador; más alto y
    *  la cobertura deja de leerse como algo que bloquea. */
-  private encuadrar() {
+  encuadrar() {
+    if (this.modoBaile) {
+      this.encuadrarBaile();
+      return;
+    }
     const { clientWidth: w, clientHeight: h } = this.contenedor;
     if (!w || !h) return;
     this.renderer.setSize(w, h);
@@ -321,5 +333,69 @@ export class Render {
 
     this.efectos.avanzar();
     this.renderer.render(this.escena, this.camara);
+  }
+
+  /** Encuadra en primer plano dinámico a la mosca para el show de baile */
+  encuadrarBaile() {
+    this.modoBaile = true;
+    const { clientWidth: w, clientHeight: h } = this.contenedor;
+    if (!w || !h) return;
+    this.renderer.setSize(w, h);
+    const aspecto = w / h;
+    const tam = 1.35;
+    let mitadX = tam, mitadY = tam / aspecto;
+    if (aspecto < 1) {
+      mitadY = tam;
+      mitadX = tam * aspecto;
+    }
+    Object.assign(this.camara, { left: -mitadX, right: mitadX, top: mitadY, bottom: -mitadY });
+    this.camara.updateProjectionMatrix();
+
+    const centro = new THREE.Vector3(this.ancho / 2, 0.4, this.alto / 2);
+    const d = 40;
+    const inclinacion = (42 * Math.PI) / 180;
+    this.camara.position.set(centro.x, d * Math.sin(inclinacion), centro.z + d * Math.cos(inclinacion));
+    this.camara.lookAt(centro);
+  }
+
+  /** Renderiza un frame del modo baile */
+  dibujarBaile(tSegundos: number, tick: number, beat: number, bajo: number): InfoBaile {
+    this.jugador.grupo.visible = false;
+    this.balas.actualizar([]);
+    this.minions.forEach((m) => (m.visible = false));
+    this.campos.forEach((c) => (c.visible = false));
+
+    const centro = { x: this.ancho / 2, y: this.alto / 2 };
+    const info = this.boss.actualizarBaile(tSegundos, tick, beat, bajo, centro);
+
+    this.efectos.avanzar();
+    this.renderer.render(this.escena, this.camara);
+    return info;
+  }
+
+  /** Encuadra en primer plano dinámico a la mosca para estimulación */
+  encuadrarNeuro() {
+    this.encuadrarBaile();
+  }
+
+  /** Renderiza un frame del modo neuroestimulación */
+  dibujarNeuro(canales: CanalesEstimulacion, tick: number, dt: number): void {
+    this.jugador.grupo.visible = false;
+    this.balas.actualizar([]);
+    this.minions.forEach((m) => (m.visible = false));
+    this.campos.forEach((c) => (c.visible = false));
+
+    const centro = { x: this.ancho / 2, y: this.alto / 2 };
+    this.boss.actualizarNeuroestimulacion(canales, tick, dt, centro);
+
+    this.efectos.avanzar();
+    this.renderer.render(this.escena, this.camara);
+  }
+
+  /** Restaura la vista y visibilidad normales del juego */
+  restaurarVistaNormal() {
+    this.modoBaile = false;
+    this.jugador.grupo.visible = true;
+    this.encuadrar();
   }
 }

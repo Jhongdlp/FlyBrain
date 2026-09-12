@@ -17,6 +17,14 @@
 import * as THREE from "three";
 import { Actor, Fase } from "./engine";
 import { contorno, tinta } from "./tinta";
+import type { CanalesEstimulacion } from "./cerebro";
+
+export interface InfoBaile {
+  pasoNombre: string;
+  circuitoNombre: string;
+  region: "t1_izq" | "t1_der" | "t1_ambos" | "t2_t3" | "alas" | "dopamina" | "grooming";
+  intensidad: number;
+}
 
 // **Dirección de arte: una mosca de dibujo animado.** Cel-shading de tres
 // tonos y contorno negro (`tinta.ts`), con la anatomía que dice "mosca" y no
@@ -125,6 +133,15 @@ const POSE: Record<Fase, Pose> = {
     inclinacion: 0.2, aleteo: 1, barrido: -2.0, alzada: 1.15,
     patas: [-0.6, -1.3, -0.85], rodilla: -0.2, levanta: [0, 0, 0], altura: 0.8, estira: 0.12,
   },
+};
+
+/** La embestida (slot 3) se hace en el aire: es la mosca tirándosele encima al
+ *  rival. Misma pose de vuelo que la esquiva —alas arriba, patas recogidas—
+ *  pero echada hacia adelante y más baja, porque va a por él y no huyendo. */
+export const EMBESTIDA = 3;
+const POSE_EMBESTIDA: Pose = {
+  ...structuredClone(POSE[Fase.Dodging]),
+  inclinacion: 0.34, altura: 0.55, estira: 0.22, aleteo: 1.3,
 };
 
 const LERP = 0.28;
@@ -305,6 +322,13 @@ export class Mosca {
   private luz = new THREE.Vector3();
   private derecha = new THREE.Vector3();
   private traspuesta = new THREE.Matrix3();
+
+  /** Cinemática suavizada continua para las 6 patas en modo neuro-lab */
+  private neuroOffsets: [number, number, number][][] = [
+    [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+    [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+  ];
+  private neuroZ = 0;
 
   constructor(escena: THREE.Scene, private camara: THREE.Camera) {
     // Esferas suaves y no facetadas: con cel-shading, las bandas de luz
@@ -537,7 +561,12 @@ export class Mosca {
 
   /** Aplica la pose actual. `fase` es la del aleteo, de 0 a 2π; `alto`, a
    *  cuánto del suelo está el centro del cuerpo. */
-  private posar(fase: number, tick: number, alto: number) {
+  private posar(
+    fase: number,
+    tick: number,
+    alto: number,
+    danceOffset?: (k: number, i: number) => [number, number, number],
+  ) {
     const p = this.p;
     const bate = p.aleteo * ARCO;
     // Las patas apoyan en el suelo del mundo, no en el del cuerpo: si el
@@ -566,7 +595,12 @@ export class Mosca {
         const ida = apoyo ? 0.5 - u : u * u * (3 - 2 * u) - 0.5;
         const alza = (apoyo ? 0 : ALZA * Math.sin(Math.PI * u)) * this.marcha;
         let froteX = 0, froteY = 0, froteZ = 0;
-        if (this.marcha < 0.05 && i === 0 && this.suelo > 0.8) {
+        if (danceOffset) {
+          const [dx, dy, dz] = danceOffset(k, i);
+          froteX = dx;
+          froteY = dy;
+          froteZ = dz;
+        } else if (this.marcha < 0.05 && i === 0 && this.suelo > 0.8) {
           const faseGroom = tick % 280;
           if (faseGroom < 80) {
             froteY = 0.05 + 0.015 * Math.sin(tick * 0.3);
@@ -614,7 +648,9 @@ export class Mosca {
   }
 
   actualizar(a: Actor, altura: number, tick: number) {
-    const objetivo = POSE[a.fase];
+    // La embestida vuela: desde que despega (Active) hasta que aterriza.
+    const embiste = a.slot === EMBESTIDA && a.fase === Fase.Active;
+    const objetivo = embiste ? POSE_EMBESTIDA : POSE[a.fase];
     const p = this.p;
     for (const k of ["inclinacion", "aleteo", "barrido", "alzada", "rodilla", "altura", "estira"] as const) {
       p[k] += (objetivo[k] - p[k]) * LERP;
@@ -623,7 +659,7 @@ export class Mosca {
       p.patas[i] += (objetivo.patas[i] - p.patas[i]) * LERP;
       p.levanta[i] += (objetivo.levanta[i] - p.levanta[i]) * LERP;
     }
-    const enElAire = a.fase === Fase.Dodging;
+    const enElAire = a.fase === Fase.Dodging || embiste;
     this.suelo += ((enElAire ? 0 : 1) - this.suelo) * (enElAire ? 0.5 : 0.2);
 
     // El paso avanza con lo que avanzó el cuerpo, más un poco por girar en el
@@ -655,7 +691,7 @@ export class Mosca {
     this.cuerpo.rotation.set(this.alabeo, 0, -(p.inclinacion + this.cabeceo));
     this.posar(tick * ESTROBO, tick, alto);
 
-    const esquiva = a.fase === Fase.Dodging;
+    const esquiva = a.fase === Fase.Dodging || embiste;
     this.brillo += ((esquiva ? 0.7 : 0) - this.brillo) * (esquiva ? 0.5 : 0.08);
     this.ojos.emissiveIntensity = this.brillo;
 
@@ -688,5 +724,423 @@ export class Mosca {
       o.rotation.set(this.alabeo, -e.f, 0, "YXZ");
       m.opacity = 0.3 * (1 - i / FANTASMAS) * this.rastro;
     });
+  }
+
+  /**
+   * Modo Baile: ejecuta la coreografía de 5 fases sincronizada con la pista de audio a 156.5 BPM.
+   * Modifica poses, deformación elástica, batido de alas y posición de las 6 patas.
+   */
+  actualizarBaile(
+    tSegundos: number,
+    tick: number,
+    beat: number,
+    bajo: number,
+    centroArena: { x: number; y: number },
+  ): InfoBaile {
+    this.suelo = 1;
+    this.marcha = 0;
+    const ciclo = tSegundos % 30.22;
+
+    let pasoNombre = "";
+    let circuitoNombre = "";
+    let region: InfoBaile["region"] = "t1_izq";
+    let intensidad = 1.0;
+
+    let targetInclinacion = 0;
+    let targetCabeceo = 0;
+    let targetAlabeo = 0;
+    let targetAltura = 0;
+    let targetEstira = 0;
+    let targetAleteo = 0;
+    let targetBarrido = -3.2;
+    let targetAlzada = 0.06;
+    let targetRodilla = -1.9;
+    let facing = 0.4;
+
+    let offsetPata: (k: number, i: number) => [number, number, number];
+
+    if (ciclo < 4.5) {
+      // FASE 1: THE BECKON (0s - 4.5s)
+      pasoNombre = "THE BECKON";
+      circuitoNombre = "T1-L MOTOR NEURONS (LEFT FRONT LEG)";
+      region = "t1_izq";
+      intensidad = 0.7 + 0.3 * bajo;
+
+      targetInclinacion = -0.22;
+      targetCabeceo = 0.08 * Math.sin(beat * Math.PI);
+      targetAlabeo = 0.06 * Math.sin(beat * Math.PI * 0.5);
+      targetAltura = 0.02;
+      targetEstira = 0.04 * Math.sin(beat * Math.PI);
+      targetAleteo = 0.25 * bajo;
+      targetBarrido = -2.3 + 0.12 * Math.sin(beat * Math.PI);
+      targetAlzada = 0.16;
+
+      offsetPata = (k, i) => {
+        const signo = k === 0 ? 1 : -1;
+        if (i === 0 && k === 0) {
+          const llamando = Math.sin(beat * Math.PI * 2);
+          return [0.24 + 0.12 * llamando, 0.32 + 0.08 * Math.cos(beat * Math.PI * 2), 0.12];
+        }
+        if (i === 0 && k === 1) {
+          return [0, 0.05 * Math.max(0, Math.sin(beat * Math.PI * 2)), 0];
+        }
+        return [0, 0.02 * Math.sin(beat * Math.PI + i), 0.03 * signo];
+      };
+    } else if (ciclo < 9.0) {
+      // FASE 2: THE LOW BOUNCE (4.5s - 9.0s)
+      pasoNombre = "THE LOW BOUNCE";
+      circuitoNombre = "T2-T3 FLEXOR MOTOR NEURONS";
+      region = "t2_t3";
+      intensidad = 0.8 + 0.4 * bajo;
+
+      const bounce = Math.abs(Math.sin(beat * Math.PI));
+      targetAltura = -0.22 + 0.12 * bounce;
+      targetEstira = -0.26 * bounce;
+      targetInclinacion = 0.18;
+      targetCabeceo = -0.12 * bounce;
+      targetRodilla = -1.15 + 0.35 * bounce;
+      targetAleteo = 0.45 * bounce;
+      targetBarrido = -2.5;
+      targetAlzada = 0.12;
+
+      offsetPata = (k, i) => {
+        const signo = k === 0 ? 1 : -1;
+        if (i === 0) {
+          return [-0.06, 0.08 + 0.04 * bounce, -0.16 * signo];
+        }
+        if (i === 1) {
+          return [0, 0, 0.20 * signo];
+        }
+        return [-0.04, 0, 0.06 * signo];
+      };
+    } else if (ciclo < 16.5) {
+      // FASE 3: CHEST PUMP & WING FLEX (9.0s - 16.5s)
+      pasoNombre = "CHEST PUMP & WING FLEX";
+      circuitoNombre = "DLM/DVM FLIGHT POWER MUSCLES";
+      region = "alas";
+      intensidad = 1.0;
+
+      const pump = Math.max(0, Math.sin(beat * Math.PI));
+      targetInclinacion = 0.28 * Math.sin(beat * Math.PI);
+      targetEstira = 0.26 * pump;
+      targetAltura = 0.05 + 0.05 * pump;
+      targetAleteo = 1.35 * Math.abs(Math.sin(beat * Math.PI));
+      targetBarrido = -1.6 + 0.35 * Math.cos(beat * Math.PI);
+      targetAlzada = 0.38;
+
+      offsetPata = (k, i) => {
+        const signo = k === 0 ? 1 : -1;
+        if (i === 0) {
+          return [0.16, 0.44 + 0.12 * pump, 0.08 * signo];
+        }
+        return [-0.04 * pump, 0, 0];
+      };
+    } else if (ciclo < 23.5) {
+      // FASE 4: CROSS-ARM CHILL FREEZE (16.5s - 23.5s)
+      pasoNombre = "CROSS-ARM CHILL FREEZE";
+      circuitoNombre = "DOPAMINE PAM/PPL1 & P1 COURTSHIP";
+      region = "dopamina";
+      intensidad = 0.6 + 0.2 * bajo;
+
+      const sway = Math.sin(beat * Math.PI * 0.5);
+      targetAlabeo = 0.22 * sway;
+      targetInclinacion = -0.08;
+      targetCabeceo = 0.10;
+      targetAltura = 0.01;
+      targetEstira = 0.02;
+      targetAleteo = 0.05 * bajo;
+      targetBarrido = -3.2;
+      targetAlzada = 0.06;
+
+      offsetPata = (k, i) => {
+        const signo = k === 0 ? 1 : -1;
+        if (i === 0) {
+          return [0.12, 0.28, -0.26 * signo];
+        }
+        return [0, (signo > 0 ? 0.06 : -0.06) * sway, 0];
+      };
+    } else {
+      // FASE 5: GROOMING BREAKDANCE & 360 SPIN (23.5s - 30.22s)
+      pasoNombre = "GROOMING BREAKDANCE (360° SPIN)";
+      circuitoNombre = "CPG GROOMING & VENTRAL NERVE CORD";
+      region = "grooming";
+      intensidad = 1.0;
+
+      const tFase = ciclo - 23.5;
+      const spin = (tFase / 6.0) * Math.PI * 2;
+      facing = 0.4 + spin;
+
+      if (ciclo >= 29.6) {
+        pasoNombre = "FINAL FREEZE";
+        targetAltura = 0.12;
+        targetInclinacion = -0.15;
+        targetEstira = 0.15;
+        targetAleteo = 1.0;
+        targetBarrido = -1.5;
+        targetAlzada = 0.4;
+        offsetPata = (k, i) => {
+          if (i === 0 && k === 0) return [0.1, 0.65, 0.2];
+          if (i === 0 && k === 1) return [-0.05, 0.22, -0.1];
+          return [0, 0, 0];
+        };
+      } else {
+        targetAltura = 0.06 + 0.04 * Math.sin(beat * Math.PI * 2);
+        targetEstira = 0.12 * Math.sin(beat * Math.PI * 2);
+        targetAleteo = 1.15;
+        targetBarrido = -1.8;
+        targetAlzada = 0.25;
+
+        offsetPata = (k, i) => {
+          const signo = k === 0 ? 1 : -1;
+          if (i === 0) {
+            const roll = tSegundos * 18;
+            return [
+              0.18 + 0.08 * Math.cos(roll),
+              0.34 + 0.08 * Math.sin(roll * signo),
+              -0.14 * signo + 0.06 * Math.sin(roll),
+            ];
+          }
+          const tap = Math.max(0, Math.sin(beat * Math.PI * 2 + (i + k) * Math.PI));
+          return [0, 0.08 * tap, 0];
+        };
+      }
+    }
+
+    // Suavizado
+    const p = this.p;
+    p.inclinacion += (targetInclinacion - p.inclinacion) * 0.35;
+    p.altura += (targetAltura - p.altura) * 0.35;
+    p.estira += (targetEstira - p.estira) * 0.35;
+    p.aleteo += (targetAleteo - p.aleteo) * 0.35;
+    p.barrido += (targetBarrido - p.barrido) * 0.35;
+    p.alzada += (targetAlzada - p.alzada) * 0.35;
+    p.rodilla += (targetRodilla - p.rodilla) * 0.35;
+    this.cabeceo += (targetCabeceo - this.cabeceo) * 0.35;
+    this.alabeo += (targetAlabeo - this.alabeo) * 0.35;
+
+    const alto = DE_PIE + p.altura;
+    this.grupo.position.set(centroArena.x, alto, centroArena.y);
+    this.grupo.rotation.y = -facing;
+    this.cuerpo.rotation.set(this.alabeo, 0, -(p.inclinacion + this.cabeceo));
+
+    this.posar(tick * ESTROBO, tick, alto, offsetPata);
+
+    const e = p.estira;
+    this.tronco.scale.set(1 + e, 1 + 0.5 * e, 1 - 0.7 * e);
+    const bombea = 1 + 0.06 * Math.sin(beat * Math.PI * 2);
+    this.panza.scale.set(1, bombea, bombea);
+
+    this.antenas.forEach((an, i) => {
+      an.rotation.set(
+        0.2 * Math.sin(beat * Math.PI * 2 + i * 2.1),
+        0,
+        0.18 * Math.sin(beat * Math.PI + i),
+      );
+    });
+
+    this.ojos.emissiveIntensity = 0.2 + 0.6 * bajo;
+    this.grupo.updateMatrixWorld(true);
+    this.mirar();
+
+    return {
+      pasoNombre,
+      circuitoNombre,
+      region,
+      intensidad,
+    };
+  }
+
+  /**
+   * Modo Neuroestimulación: acoplamiento cinemático biomecánico directo.
+   * Modifica en tiempo real poses, postura, ángulos articulares de las 6 patas y alas
+   * en respuesta directa a los canales optogenéticos estimulados.
+   */
+  actualizarNeuroestimulacion(
+    canales: CanalesEstimulacion,
+    tick: number,
+    dt: number,
+    centroArena: { x: number; y: number },
+  ) {
+    this.suelo = 1;
+
+    const t1L = canales.t1_izq || 0;
+    const t1R = canales.t1_der || 0;
+    const t23 = canales.t2_t3 || 0;
+    const alas = canales.alas || 0;
+    const mdn = canales.moonwalker || 0;
+    const court = canales.courtship || 0;
+
+    // Respiración y balanceo micro-orgánico continuo para evitar rigidez
+    const respiro = 0.016 * Math.sin(tick * 0.07);
+    const balanceo = 0.012 * Math.cos(tick * 0.05);
+
+    let targetInclinacion = 0.04;
+    let targetCabeceo = 0;
+    let targetAlabeo = balanceo;
+    let targetAltura = respiro;
+    let targetEstira = 0;
+    let targetAleteo = 0;
+    let targetBarrido = -3.2;
+    let targetAlzada = 0.06;
+    let targetRodilla = -1.9;
+
+    // 1. T1: Extensión y gestualidad rítmica de patas delanteras (The Reach & Swipe)
+    const minT1 = Math.min(t1L, t1R);
+    if (minT1 > 0.08) {
+      // Doble elevación celebratoria (pump)
+      targetInclinacion -= 0.22 * minT1;
+      targetAltura += 0.05 * minT1;
+      targetEstira += 0.12 * minT1;
+    } else {
+      if (t1L > 0.03) {
+        targetInclinacion -= 0.14 * t1L;
+        targetAlabeo -= 0.16 * t1L;
+        targetCabeceo += 0.07 * t1L;
+        targetAltura += 0.025 * t1L;
+      }
+      if (t1R > 0.03) {
+        targetInclinacion -= 0.14 * t1R;
+        targetAlabeo += 0.16 * t1R;
+        targetCabeceo += 0.07 * t1R;
+        targetAltura += 0.025 * t1R;
+      }
+    }
+
+    // 2. T2-T3: Sentadilla torácica profunda y rebote elástico (The Bass Squat)
+    if (t23 > 0.03) {
+      targetAltura -= 0.25 * t23;
+      targetEstira -= 0.24 * t23;
+      targetInclinacion += 0.15 * t23;
+      targetRodilla = -1.9 * (1 - t23) + (-1.0) * t23;
+    }
+
+    // 3. ALAS: Motores de vuelo y vibración resonante (DLM / DVM)
+    if (alas > 0.03) {
+      targetAleteo += 1.45 * alas;
+      targetBarrido = -3.2 * (1 - alas) + (-1.45) * alas;
+      targetAlzada = 0.06 * (1 - alas) + 0.36 * alas;
+      targetEstira += 0.15 * alas * Math.sin(tick * 0.55);
+    }
+
+    // 4. MOONWALKER: MDN marcha en reversa y deslizamiento fluido
+    if (mdn > 0.03) {
+      this.marcha = Math.min(1.0, this.marcha + (mdn * 0.95 - this.marcha) * 0.18);
+      // Tripod gait invertido suave
+      this.paso = (this.paso - dt * 2.8 * mdn + 1.0) % 1.0;
+      targetInclinacion += 0.15 * mdn;
+      targetCabeceo += 0.06 * mdn * Math.sin(this.paso * Math.PI * 2);
+      const targetZ = Math.sin(this.paso * Math.PI * 2) * 0.14;
+      this.neuroZ += (targetZ - this.neuroZ) * 0.16;
+    } else {
+      this.marcha += (0 - this.marcha) * 0.14;
+      this.neuroZ += (0 - this.neuroZ) * 0.14;
+    }
+
+    // 5. COURTSHIP: P1 despliegue de cortejo y vibración unilateral de ala
+    if (court > 0.03) {
+      targetAlabeo += 0.24 * court * Math.sin(tick * 0.16);
+      targetInclinacion -= 0.10 * court;
+      targetBarrido = -3.2 * (1 - court * 0.65) + (-1.65) * (court * 0.65);
+      targetAleteo = Math.max(targetAleteo, 0.55 * court);
+    }
+
+    // Suavizado dinámico de la pose corporal con factor críticamente amortiguado (0.18)
+    const factorPose = 0.18;
+    const p = this.p;
+    p.inclinacion += (targetInclinacion - p.inclinacion) * factorPose;
+    p.altura += (targetAltura - p.altura) * factorPose;
+    p.estira += (targetEstira - p.estira) * factorPose;
+    p.aleteo += (targetAleteo - p.aleteo) * factorPose;
+    p.barrido += (targetBarrido - p.barrido) * factorPose;
+    p.alzada += (targetAlzada - p.alzada) * factorPose;
+    p.rodilla += (targetRodilla - p.rodilla) * factorPose;
+    this.cabeceo += (targetCabeceo - this.cabeceo) * factorPose;
+    this.alabeo += (targetAlabeo - this.alabeo) * factorPose;
+
+    // Matriz de posiciones deseadas (targets) para las 6 patas
+    const targets: [number, number, number][][] = [
+      [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+      [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+    ];
+
+    for (let k = 0; k < 2; k++) {
+      const signo = k === 0 ? 1 : -1;
+      // Patas delanteras T1
+      let dx0 = 0, dy0 = 0, dz0 = 0;
+      if (k === 0 && t1L > 0.02) {
+        dx0 = (0.24 + 0.06 * Math.cos(tick * 0.25)) * t1L;
+        dy0 = (0.34 + 0.06 * Math.sin(tick * 0.28)) * t1L;
+        dz0 = 0.12 * t1L;
+      }
+      if (k === 1 && t1R > 0.02) {
+        dx0 = (0.24 + 0.06 * Math.cos(tick * 0.25)) * t1R;
+        dy0 = (0.34 + 0.06 * Math.cos(tick * 0.28)) * t1R;
+        dz0 = -0.12 * t1R;
+      }
+      if (court > 0.03) {
+        dx0 += 0.10 * court;
+        dy0 += (0.20 + 0.05 * Math.sin(tick * 0.35)) * court;
+        dz0 += -0.18 * signo * court;
+      }
+      targets[k][0] = [dx0, dy0, dz0];
+
+      // Patas intermedias T2
+      let dx1 = 0, dy1 = 0, dz1 = 0;
+      if (t23 > 0.02) {
+        dx1 = -0.06 * t23;
+        dy1 = 0.06 * t23;
+        dz1 = 0.20 * signo * t23;
+      }
+      targets[k][1] = [dx1, dy1, dz1];
+
+      // Patas traseras T3
+      let dx2 = 0, dy2 = 0, dz2 = 0;
+      if (t23 > 0.02) {
+        dx2 = -0.04 * t23;
+        dy2 = 0.04 * t23;
+        dz2 = 0.14 * signo * t23;
+      }
+      targets[k][2] = [dx2, dy2, dz2];
+    }
+
+    // Suavizado continuo de las 6 patas: elimina todo temblor y salto discontinuo
+    const lerpPatas = 0.18;
+    for (let k = 0; k < 2; k++) {
+      for (let i = 0; i < 3; i++) {
+        for (let axis = 0; axis < 3; axis++) {
+          this.neuroOffsets[k][i][axis] += (targets[k][i][axis] - this.neuroOffsets[k][i][axis]) * lerpPatas;
+        }
+      }
+    }
+
+    const offsetPata = (k: number, i: number): [number, number, number] => {
+      return this.neuroOffsets[k][i];
+    };
+
+    const alto = DE_PIE + p.altura;
+    this.grupo.position.set(centroArena.x, alto, centroArena.y + this.neuroZ);
+    this.grupo.rotation.y = -0.4;
+    this.cuerpo.rotation.set(this.alabeo, 0, -(p.inclinacion + this.cabeceo));
+
+    this.posar(tick * ESTROBO, tick, alto, offsetPata);
+
+    const e = p.estira;
+    this.tronco.scale.set(1 + e, 1 + 0.5 * e, 1 - 0.7 * e);
+    const pump = alas > 0.05 ? 1 + 0.12 * alas * Math.sin(tick * 0.6) : 1 + 0.035 * Math.sin(tick * 0.11);
+    this.panza.scale.set(1, pump, pump);
+
+    this.antenas.forEach((an, i) => {
+      const freq = court > 0.1 ? 0.6 : 0.15;
+      an.rotation.set(
+        0.2 * Math.sin(tick * freq + i * 2.1),
+        0,
+        0.18 * Math.sin(tick * freq * 0.8 + i),
+      );
+    });
+
+    this.ojos.emissive.setHex(0xff6b5a);
+    this.ojos.emissiveIntensity = 0;
+    this.grupo.updateMatrixWorld(true);
+    this.mirar();
   }
 }

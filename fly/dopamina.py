@@ -47,17 +47,18 @@ def de_tipo(red, prefijo) -> np.ndarray:
     return np.flatnonzero(np.char.startswith(red.tipo.astype(str), prefijo))
 
 
-def compartimentos(red) -> np.ndarray:
-    """Cuánto le llega de cada PPL1 a cada MBON: `(n_mbon, n_ppl1)`, filas que
-    suman 1 (o 0 si no le llega ninguna).
+def compartimentos(red, dan="PPL1") -> np.ndarray:
+    """Cuánto le llega de cada dopaminérgica `dan` (PPL1 castigo, PAM
+    recompensa) a cada MBON: `(n_mbon, n_dan)`, filas que suman 1 (o 0 si no le
+    llega ninguna).
 
-    Sale de las sinapsis PPL1→MBON del conectoma crudo: en `red.W` valen 0,
-    porque la dopamina no es corriente. Una PPL1 hace sinapsis en las dendritas
+    Sale de las sinapsis DAN→MBON del conectoma crudo: en `red.W` valen 0,
+    porque la dopamina no es corriente. Una DAN hace sinapsis en las dendritas
     de las MBON de su compartimento, así que es un buen indicador de qué MBON
     modula. Se lee el archivo en tandas —son 500 MB— y se cachea.
     """
-    cache = R.DATOS / "dopamina.npz"
-    ppl1, mbon = de_tipo(red, "PPL1"), de_tipo(red, "MBON")
+    cache = R.DATOS / ("dopamina.npz" if dan == "PPL1" else f"dopamina_{dan}.npz")
+    ppl1, mbon = de_tipo(red, dan), de_tipo(red, "MBON")
     if not cache.exists():
         import pandas as pd
         import pyarrow.compute as pc
@@ -70,7 +71,7 @@ def compartimentos(red) -> np.ndarray:
         filas = []
         for k in range(f.num_record_batches):
             b = f.get_batch(k)
-            m = pc.and_(pc.starts_with(b["type_pre"], "PPL1"), pc.starts_with(b["type_post"], "MBON"))
+            m = pc.and_(pc.starts_with(b["type_pre"], dan), pc.starts_with(b["type_post"], "MBON"))
             filas.append(b.filter(m).select(["body_pre", "body_post", "weight"]).to_pandas())
         e = pd.concat(filas)
         e = e[e["body_pre"].isin(pos) & e["body_post"].isin(pos)]
@@ -102,22 +103,25 @@ MARGEN = 2.0
 
 
 class Plasticidad:
-    """KC→MBON se debilita donde coinciden una KC elegible y dopamina de las PPL1
-    que llegan a esa MBON. Solo deprime: es la mitad del castigo de la regla de la
-    mosca, sin la vuelta atrás.
+    """KC→MBON se debilita donde coinciden una KC elegible y dopamina de las DAN
+    que llegan a esa MBON. Solo deprime, sea castigo (PPL1) o recompensa (PAM):
+    en la mosca las dos deprimen, y lo que cambia es en qué compartimento. Sin la
+    vuelta atrás.
 
     Cambia `red.W` en su lugar: la mosca que aprende tiene que tener su propia
     copia del conectoma (`aprendiz`), o les contagiaría lo aprendido a las demás.
 
-    ponytail: la dopamina se mide como disparos de PPL1 por encima de su propio
-    promedio (las PPL1 disparan solas en este LIF); el día que estén calladas en
+    ponytail: la dopamina se mide como disparos de cada DAN por encima de su
+    propio promedio (disparan solas en este LIF); el día que estén calladas en
     reposo, sobra la resta.
     """
 
-    def __init__(self, red, tick_ms=1000.0 / 60.0):
+    def __init__(self, red, tick_ms=1000.0 / 60.0, dans=("PPL1",)):
         self.red = red
-        self.kc, self.mbon, self.ppl1 = kc(red), de_tipo(red, "MBON"), de_tipo(red, "PPL1")
-        self.C = compartimentos(red)
+        self.kc, self.mbon = kc(red), de_tipo(red, "MBON")
+        # Todas las DAN juntas: una columna de C por neurona, de cualquier grupo.
+        self.dan = np.concatenate([de_tipo(red, d) for d in dans])
+        self.C = np.hstack([compartimentos(red, d) for d in dans])
         W = red.W  # CSC (post, pre): la columna j son las sinapsis que salen de j
         pre = np.repeat(np.arange(W.shape[1]), np.diff(W.indptr))
         es_kc = np.zeros(red.n, bool); es_kc[self.kc] = True
@@ -128,14 +132,14 @@ class Plasticidad:
         self.w0 = W.data[self.pos].copy()
         self.traza = np.zeros(self.kc.size)
         self.decae = np.exp(-tick_ms / TRAZA_MS)
-        self.base = np.zeros(self.ppl1.size)
+        self.base = np.zeros(self.dan.size)
 
     def tick(self, d):
         """`d`: disparos del tick, `(pasos, n)`."""
         self.traza = np.maximum(self.traza * self.decae, d[:, self.kc].any(0))
-        ppl1 = d[:, self.ppl1].sum(0).astype(float)
-        da = np.maximum(ppl1 - self.base - MARGEN, 0.0)
-        self.base += (ppl1 - self.base) / 120  # 2 s
+        dan = d[:, self.dan].sum(0).astype(float)
+        da = np.maximum(dan - self.base - MARGEN, 0.0)
+        self.base += (dan - self.base) / 120  # 2 s
         llega = self.C @ da  # dopamina en cada MBON
         cambio = ETA * self.traza[self.de_kc] * llega[self.a_mbon]
         if cambio.any():

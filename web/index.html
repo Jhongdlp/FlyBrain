@@ -6,119 +6,462 @@
     <title>FlyBrain</title>
     <style>
       :root { color-scheme: dark; }
-      html, body { margin: 0; height: 100%; background: #070a0f; overflow: hidden; }
+      html, body {
+        margin: 0; padding: 0; height: 100%; width: 100%;
+        background: #000000; overflow: hidden;
+        font-family: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      }
       canvas { display: block; }
 
-      #juego { position: fixed; inset: 0; }
+      /* Panel Lateral Izquierdo: 1/4 de pantalla, blanco y negro puro */
+      #sidebar {
+        position: fixed; top: 0; left: 0; bottom: 0;
+        width: clamp(280px, 25vw, 360px);
+        background: #040404; border-right: 1px solid #1c1c1c;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 10px; box-sizing: border-box; z-index: 10;
+        user-select: none;
+      }
 
-      /* El cerebro es una miniatura en la esquina: el juego es lo principal.
-         Tres estados — miniatura, grande y escondido — con los botones de
-         arriba a la derecha del panel. Si la pelea no trae actividad grabada,
-         el panel no aparece. */
+      /* Selector de Modo Minimalista B&W */
+      #selectorModo { display: flex; gap: 4px; width: 100%; }
+      #selectorModo button {
+        flex: 1; font: 10px/1.3 inherit; letter-spacing: .08em; text-transform: uppercase;
+        color: #666666; background: #0a0a0a; border: 1px solid #1c1c1c;
+        padding: 5px 0; cursor: pointer; transition: color .1s, border-color .1s, background .1s;
+      }
+      #selectorModo button:hover { color: #ffffff; border-color: #383838; }
+      #selectorModo button.activo {
+        color: #ffffff; background: #161616; border-color: #ffffff;
+      }
+
+      /* Títulos y cabeceras de sección */
+      .sec-header {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+        color: #666666; padding: 0 2px 2px;
+      }
+      .sec-header span.sec-val { color: #aaaaaa; }
+
+      /* Bloque Cerebro 3D (Arriba) */
+      #cerebroWrap { display: flex; flex-direction: column; flex: 1.4; min-height: 180px; }
       #cerebro {
-        position: fixed; top: 16px; right: 16px; z-index: 2;
-        width: 300px; height: 240px; background: #070a0f;
-        border: 1px solid #1b2836; overflow: hidden;
-        transition: width .2s, height .2s;
+        position: relative; width: 100%; flex: 1; min-height: 160px;
+        background: #000000; border: 1px solid #1c1c1c; overflow: hidden;
       }
-      #cerebro.grande { width: min(46vw, 760px); height: min(74vh, 680px); }
-      #cerebro.oculto { width: 132px; height: 30px; }
-      #cerebro.oculto canvas, #cerebro.oculto .rotulos > :not(.botones) { display: none; }
-      /* En miniatura, solo lo que se lee de un vistazo: la fibra gigante. */
-      #cerebro:not(.grande) .leyenda > :not(#escape),
-      #cerebro:not(.grande) .lectura { display: none; }
-      #cerebro:not(.grande) .titulo { font-size: 9px; top: 9px; left: 10px; }
-      #cerebro:not(.grande) .leyenda { bottom: 8px; right: 10px; font-size: 10px; }
-      .botones { top: 5px; right: 6px; pointer-events: auto; display: flex; gap: 4px; }
-      .botones button {
-        font: inherit; font-size: 11px; color: #8fa8bd; background: #0e1824;
-        border: 1px solid #1b2836; padding: 2px 7px; cursor: pointer;
+      #cerebro canvas { width: 100% !important; height: 100% !important; }
+      .cerebro-pie {
+        display: flex; justify-content: space-between; font-size: 9px;
+        color: #666666; letter-spacing: .06em; text-transform: uppercase;
+        padding: 3px 2px 0;
       }
-      .botones button:hover { color: #dfe9f4; border-color: #35485f; }
+      #escape { color: #444444; transition: color .05s; }
+      #escape.activa { color: #ffffff; text-shadow: 0 0 8px #ffffff; font-weight: bold; }
 
-      #hud, .rotulos {
-        position: absolute; inset: 0; pointer-events: none;
-        font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
-        color: #5d7186; letter-spacing: .08em; text-transform: uppercase;
+      /* Bloque Ojos / Retina (Abajo del cerebro) */
+      #ojoWrap { display: flex; flex-direction: column; flex: 1; min-height: 130px; }
+      #ojo {
+        position: relative; width: 100%; flex: 1; min-height: 110px;
+        background: #000000; border: 1px solid #1c1c1c; overflow: hidden;
       }
-      #hud > div, .rotulos > div { position: absolute; }
-      #tel { top: 16px; left: 20px; }
-      #ayuda { bottom: 16px; left: 20px; }
+      #ojo canvas { width: 100% !important; height: 100% !important; }
+      .ojo-pie {
+        display: flex; justify-content: space-between; font-size: 8px;
+        color: #555555; letter-spacing: .08em; text-transform: uppercase;
+        padding: 2px 4px 0;
+      }
+
+      /* Bloque Gráfica / Telemetría */
+      #telemetriaWrap { display: flex; flex-direction: column; flex: 0.9; min-height: 110px; }
+      #graficaCanvas {
+        width: 100%; height: 58px; background: #000000;
+        border: 1px solid #1c1c1c; box-sizing: border-box;
+      }
+      .telemetria-metricas {
+        display: flex; flex-direction: column; gap: 3px; margin-top: 4px;
+        font-size: 9px; color: #666666; letter-spacing: .06em; text-transform: uppercase;
+      }
+      .fila-m { display: flex; justify-content: space-between; }
+      .fila-m span.v { color: #aaaaaa; }
+      .barra-mini { height: 2px; background: #181818; overflow: hidden; margin: 1px 0; }
+      #mantisLoomBar { height: 100%; width: 0%; background: #ffffff; transition: width 0.05s linear; }
+
+      /* Arena de Juego (3/4 de la pantalla, derecha) */
+      #juego {
+        position: fixed; top: 0; left: clamp(280px, 25vw, 360px);
+        right: 0; bottom: 0; background: #000000;
+      }
+
+      /* HUD del Juego */
+      #hud {
+        position: absolute; inset: 0; pointer-events: none;
+        font: 11px/1.4 inherit; color: #666666; letter-spacing: .08em; text-transform: uppercase;
+      }
+      #hud > div { position: absolute; }
+      #tel { top: 16px; left: 20px; font-size: 10px; }
+      #ayuda { bottom: 16px; left: 20px; font-size: 10px; color: #444444; }
       #fin {
         inset: 0; display: none; place-content: center; text-align: center;
-        font-size: 20px; letter-spacing: .3em; color: #8fa8bd;
+        font-size: 18px; letter-spacing: .25em; color: #aaaaaa;
       }
 
-      /* Barras técnicas, no de fantasía: un riel vacío y un relleno que baja.
-         Nunca en el color de peligro — ese está reservado. */
-      .barra { height: 4px; background: #1b2836; outline: 1px solid #35485f; }
-      .barra > i { display: block; height: 100%; background: #8fa8bd;
-                   transition: width .12s linear; }
+      .barra { height: 3px; background: #181818; outline: 1px solid #282828; }
+      .barra > i { display: block; height: 100%; background: #aaaaaa; transition: width .12s linear; }
 
-      /* El boss cruza la pantalla arriba: es una pelea contra un boss y la
-         barra lo dice antes que cualquier texto. */
-      #boss { top: 46px; left: 50%; transform: translateX(-50%); width: min(80%, 640px); }
-      #boss .barra > i { background: #dfe9f4; }
-      #boss span { display: block; margin-bottom: 6px; text-align: center; font-size: 10px; }
+      #boss { top: 32px; left: 50%; transform: translateX(-50%); width: min(70%, 460px); }
+      #boss .barra > i { background: #ffffff; }
+      #boss span { display: block; margin-bottom: 4px; text-align: center; font-size: 9px; }
 
-      #vida { bottom: 44px; left: 20px; width: 200px; }
-      #vida span { display: block; margin-bottom: 6px; font-size: 10px; }
+      #vida { bottom: 36px; left: 20px; width: 160px; }
+      #vida span { display: block; margin-bottom: 4px; font-size: 9px; }
 
-      .rotulos .titulo { top: 16px; left: 20px; }
-      .rotulos .lectura { bottom: 16px; left: 20px; }
-      .rotulos .leyenda { bottom: 16px; right: 20px; text-align: right; }
-      .punto { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-               margin-right: 6px; vertical-align: 1px; }
-      /* El ojo, abajo a la derecha: lo que vio la retina, tick a tick. Solo
-         aparece si la pelea trae su `.ojo`. */
-      #ojo {
-        position: fixed; bottom: 16px; right: 16px; z-index: 2;
-        width: 380px; height: 214px; background: #070a0f;
-        border: 1px solid #1b2836;
+      /* Modal de resultado Mantis */
+      .modal {
+        position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.9);
+        display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
       }
-      #ojo canvas { width: 100%; height: 190px; }
-      #ojo .rotulos > div { position: static; padding: 0 10px; font-size: 9px;
-                            display: flex; justify-content: space-between; }
+      .modal-contenido {
+        background: #0a0a0a; border: 1px solid #222222; width: min(90%, 400px); padding: 20px;
+        text-align: left; color: #ffffff; font-family: inherit; letter-spacing: .06em;
+      }
+      .modal h2 { margin: 0 0 6px; font-size: 12px; letter-spacing: .1em; color: #ffffff; text-transform: uppercase; }
+      .modal-desc { font-size: 10px; line-height: 1.5; color: #777777; margin-bottom: 12px; }
+      .modal-stats {
+        background: #111111; border: 1px solid #222222; padding: 8px 12px; margin-bottom: 14px;
+        font-size: 9px; line-height: 1.8; color: #aaaaaa; text-transform: uppercase;
+      }
+      .modal-stats strong { color: #ffffff; }
+      .modal-acciones { display: flex; gap: 8px; justify-content: flex-end; }
+      .modal-acciones button {
+        font: inherit; font-size: 10px; padding: 5px 10px; cursor: pointer;
+        border: 1px solid #222222; background: #141414; color: #aaaaaa; text-transform: uppercase;
+      }
+      .modal-acciones button:hover { border-color: #555555; color: #ffffff; }
+      .modal-acciones button.btn-resaltado { background: #222222; color: #ffffff; border-color: #ffffff; }
 
-      #escape { color: #5d7186; transition: color .05s; }
-      #escape.activa { color: #ffffff; }
+      /* Selector de vistas para Modo Baile */
+      .selector-vistas { display: flex; gap: 4px; width: 100%; margin-top: 2px; }
+      .btn-vista {
+        flex: 1; font: 9px/1.3 inherit; letter-spacing: .06em; text-transform: uppercase;
+        color: #777777; background: #0c0c10; border: 1px solid #202028;
+        padding: 5px 3px; cursor: pointer; border-radius: 3px;
+        transition: color .15s, border-color .15s, background .15s, box-shadow .15s;
+      }
+      .btn-vista:hover { color: #ffffff; border-color: #444455; }
+      .btn-vista.activo {
+        color: #00f0ff; background: #101926; border-color: #00f0ff;
+        box-shadow: 0 0 10px rgba(0, 240, 255, 0.25); font-weight: bold;
+      }
+
+      /* Modo Baile y Modo Neuro: Ojos eliminados, cerebro maximizado con gran altura */
+      body.modo-baile #sidebar, body.modo-neuro #sidebar {
+        width: clamp(360px, 34vw, 500px);
+        background: #030408;
+      }
+      body.modo-baile #juego, body.modo-neuro #juego {
+        left: clamp(360px, 34vw, 500px);
+      }
+      body.modo-baile #ojoWrap, body.modo-neuro #ojoWrap {
+        display: none !important; /* Eliminamos ojos en baile y neuro para ocupar todo el espacio con el cerebro */
+      }
+      body.modo-baile #cerebroWrap, body.modo-neuro #cerebroWrap {
+        flex: 1.4;
+        min-height: 220px;
+      }
+      body.modo-baile #cerebro, body.modo-neuro #cerebro {
+        flex: 1;
+        min-height: 200px;
+        border: 1px solid #1a2233;
+        border-radius: 6px;
+        background: radial-gradient(circle at 50% 45%, #050912 0%, #000000 100%);
+      }
+      body.modo-baile #telemetriaWrap {
+        flex: 0.9;
+        min-height: 125px;
+      }
+      body.modo-neuro #telemetriaWrap {
+        flex: 2.2;
+        min-height: 310px;
+        overflow-y: auto;
+      }
+
+      /* Vista Dual 50/50 (opcional vía botón) */
+      body.modo-baile.vista-dual #sidebar, body.modo-neuro.vista-dual #sidebar {
+        width: 48vw;
+      }
+      body.modo-baile.vista-dual #juego, body.modo-neuro.vista-dual #juego {
+        left: 48vw;
+        width: 52vw;
+      }
+
+      /* Vista Cerebro 3D Completo */
+      body.modo-baile.vista-cerebro #sidebar, body.modo-neuro.vista-cerebro #sidebar {
+        width: 100vw;
+        background: #000000;
+      }
+      body.modo-baile.vista-cerebro #cerebroWrap, body.modo-neuro.vista-cerebro #cerebroWrap {
+        flex: 1;
+      }
+      body.modo-baile.vista-cerebro #cerebro, body.modo-neuro.vista-cerebro #cerebro {
+        height: 100%;
+        min-height: 440px;
+      }
+      body.modo-baile.vista-cerebro #juego, body.modo-neuro.vista-cerebro #juego {
+        left: auto; right: 24px; bottom: 24px;
+        width: min(340px, 36vw); height: min(240px, 28vh);
+        z-index: 40;
+        border: 2px solid #00f0ff;
+        border-radius: 8px;
+        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.9), 0 0 25px rgba(0, 240, 255, 0.35);
+        overflow: hidden;
+      }
+
+      /* Vista Mosca 3D Completa */
+      body.modo-baile.vista-mosca #juego, body.modo-neuro.vista-mosca #juego {
+        left: 0; width: 100vw;
+      }
+      body.modo-baile.vista-mosca #sidebar, body.modo-neuro.vista-mosca #sidebar {
+        left: auto; right: 24px; top: 24px; bottom: auto;
+        width: min(360px, 38vw); height: min(320px, 45vh);
+        z-index: 40;
+        border: 2px solid #ff007f;
+        border-radius: 8px;
+        background: rgba(3, 4, 8, 0.94);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.9), 0 0 25px rgba(255, 0, 127, 0.35);
+        padding: 10px;
+      }
+
+      /* Estilos para Neuro-Lab Pads y Secuenciador */
+      .pad-btn {
+        background: #090a10;
+        border: 1px solid #1a1e2a;
+        color: #7d8e9e;
+        font: 8px/1.2 inherit;
+        padding: 6px 3px;
+        cursor: pointer;
+        border-radius: 3px;
+        text-align: center;
+        transition: background .08s, border-color .08s, box-shadow .08s, color .08s;
+        user-select: none;
+      }
+      .pad-btn:hover {
+        border-color: #485c72;
+        color: #ffffff;
+      }
+      .pad-btn.disparando {
+        color: #ffffff !important;
+        background: rgba(255, 255, 255, 0.18) !important;
+        font-weight: bold;
+      }
+
+      .seq-row {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .seq-label {
+        width: 38px;
+        font-size: 8px;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        font-weight: bold;
+        flex-shrink: 0;
+      }
+      .seq-steps {
+        display: flex;
+        flex: 1;
+        gap: 2px;
+      }
+      .seq-step {
+        flex: 1;
+        height: 13px;
+        background: #08080c;
+        border: 1px solid #161822;
+        border-radius: 2px;
+        cursor: pointer;
+        transition: background .08s, border-color .08s, box-shadow .08s;
+      }
+      .seq-step:hover {
+        border-color: #444466;
+      }
+      .seq-step.beat-start {
+        margin-left: 3px;
+      }
+      .seq-step.cursor-activo {
+        outline: 1px solid #ffffff;
+        box-shadow: 0 0 8px #ffffff;
+      }
     </style>
   </head>
   <body>
+    <!-- Left Sidebar: 1/4 of screen -->
+    <div id="sidebar">
+      <div id="selectorModo">
+        <button id="btnMantis" class="activo">mantis</button>
+        <button id="btnReplay">replay</button>
+        <button id="btnBaile">dance</button>
+        <button id="btnNeuro">neuro-lab</button>
+      </div>
+      <div id="baileVistaSelector" class="selector-vistas" style="display: none;">
+        <button id="btnVistaNormal" class="btn-vista activo" title="Sidebar view with enlarged connectome">sidebar</button>
+        <button id="btnVistaDual" class="btn-vista" title="50/50 Split screen">split 50/50</button>
+        <button id="btnVistaCerebro" class="btn-vista" title="Full connectome view">connectome 3d</button>
+      </div>
+
+      <!-- 3D Connectome -->
+      <div id="cerebroWrap">
+        <div class="sec-header">
+          <span>malecns connectome</span>
+          <span class="sec-val" id="neuronas">164,506 neurons</span>
+        </div>
+        <div id="cerebro"></div>
+        <div class="cerebro-pie">
+          <span id="lectura">0 spikes</span>
+          <span id="escape">dnp01 escape</span>
+        </div>
+      </div>
+
+      <!-- Drosophila Retina -->
+      <div id="ojoWrap">
+        <div class="sec-header">
+          <span>drosophila retina</span>
+          <span class="sec-val">1,442 ommatidia</span>
+        </div>
+        <div id="ojo">
+          <canvas></canvas>
+        </div>
+        <div class="ojo-pie">
+          <span>left</span>
+          <span>· front ·</span>
+          <span>right</span>
+        </div>
+      </div>
+
+      <!-- Activity & Telemetry -->
+      <div id="telemetriaWrap">
+        <div class="sec-header">
+          <span>neural activity</span>
+          <span class="sec-val" id="mantisEstadoTexto">stealth</span>
+        </div>
+        <canvas id="graficaCanvas"></canvas>
+        <div id="mantisPanel" class="telemetria-metricas">
+          <div class="fila-m">
+            <span>looming</span>
+            <span class="v" id="mantisLoomVal">0.00 rad/s</span>
+          </div>
+          <div class="barra-mini"><div id="mantisLoomBar"></div></div>
+          <div class="fila-m">
+            <span>dist <span class="v" id="mantisDist">--</span></span>
+            <span>closure <span class="v" id="mantisCierre">--</span></span>
+            <span>dnp01 <span class="v" id="mantisGf">0%</span></span>
+          </div>
+        </div>
+        <div id="replayPanel" class="telemetria-metricas" style="display: none;">
+          <div class="fila-m">
+            <span>playback</span>
+            <span class="v" id="replayInfo">recorded fight</span>
+          </div>
+        </div>
+        <div id="bailePanel" class="telemetria-metricas" style="display: none;">
+          <div class="fila-m">
+            <span>choreography</span>
+            <span class="v" id="bailePaso">THE BECKON</span>
+          </div>
+          <div class="fila-m">
+            <span>circuit</span>
+            <span class="v" id="baileCircuito">T1-L MOTOR NEURONS</span>
+          </div>
+          <div class="barra-mini"><div id="baileBeatBar" style="height: 100%; width: 0%; background: #ffffff;"></div></div>
+          <div class="fila-m">
+            <span>time <span class="v" id="baileTiempo">0:00 / 0:30</span></span>
+            <span>bpm <span class="v">156.5</span></span>
+          </div>
+          <div style="display: flex; gap: 4px; margin-top: 5px;">
+            <button id="btnPlayBaile" style="flex: 1; font: 9px/1.3 inherit; padding: 4px 0; background: #161616; border: 1px solid #333; color: #fff; cursor: pointer; text-transform: uppercase;">play music</button>
+            <button id="btnReiniciarBaile" style="font: 9px/1.3 inherit; padding: 4px 8px; background: #0a0a0a; border: 1px solid #222; color: #aaa; cursor: pointer; text-transform: uppercase;">restart</button>
+          </div>
+        </div>
+        <div id="neuroPanel" class="telemetria-metricas" style="display: none; flex-direction: column; gap: 7px;">
+          <div class="sec-header" style="padding: 0;">
+            <span>optogenetic triggers</span>
+            <span class="sec-val">[1]-[6] keys</span>
+          </div>
+          <div id="neuroPadsGrid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px;"></div>
+
+          <div class="sec-header" style="margin-top: 2px; padding: 0;">
+            <span>16-step neuro-sequencer</span>
+            <span class="sec-val" id="neuroStepIndicator">step 01/16</span>
+          </div>
+          <div id="neuroMatrixWrap" style="background: #000000; border: 1px solid #1c1c1c; padding: 4px; border-radius: 4px; display: flex; flex-direction: column; gap: 3px;"></div>
+
+          <div style="display: flex; gap: 4px; align-items: center;">
+            <button id="btnPlayNeuro" style="flex: 1.2; font: 9px/1.3 inherit; padding: 5px 0; background: #161616; border: 1px solid #333; color: #fff; cursor: pointer; text-transform: uppercase;">start [space]</button>
+            <button id="btnClearNeuro" style="flex: 0.8; font: 9px/1.3 inherit; padding: 5px 0; background: #0c0c0c; border: 1px solid #222; color: #888; cursor: pointer; text-transform: uppercase;">clear</button>
+            <select id="selPresetNeuro" style="flex: 1.6; font: 9px/1.3 inherit; padding: 4px; background: #0c0c0c; border: 1px solid #222; color: #ccc; text-transform: uppercase; cursor: pointer;">
+              <option value="0">afro-fusion groove</option>
+              <option value="1">cyber breakbeat</option>
+              <option value="2">moonwalker pop</option>
+              <option value="3">courtship solar song</option>
+              <option value="4">neuro-disco bounce</option>
+            </select>
+          </div>
+
+          <div style="display: flex; gap: 6px; font-size: 8px; color: #888; text-transform: uppercase; align-items: center;">
+            <span style="flex: 1;">bpm: <span id="valBpmNeuro" style="color: #fff;">128</span></span>
+            <input type="range" id="sliderBpmNeuro" min="80" max="200" value="128" step="2" style="flex: 2; height: 3px; accent-color: #00f0ff;" />
+            <span style="flex: 1; text-align: right;">power: <span id="valPotenciaNeuro" style="color: #fff;">100%</span></span>
+            <input type="range" id="sliderPotenciaNeuro" min="20" max="100" value="100" step="5" style="flex: 2; height: 3px; accent-color: #00ff88;" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3D Arena -->
     <div id="juego">
-    <div id="hud">
-      <div id="tel"></div>
-      <div id="boss">
-        <span>espécimen</span>
-        <div class="barra"><i id="bossHp"></i></div>
-      </div>
-      <div id="vida">
-        <span>sujeto</span>
-        <div class="barra"><i id="playerHp"></i></div>
-      </div>
-      <div id="ayuda">␣ pausa · r reiniciar · ?pelea=nombre para otra grabación</div>
-      <div id="fin"></div>
-    </div>
-    </div>
-    <div id="cerebro" hidden>
-      <div class="rotulos">
-        <div class="titulo">conectoma MaleCNS · <span id="neuronas"></span></div>
-        <div class="botones">
-          <button id="agrandar" title="agrandar / achicar">⤢</button>
-          <button id="esconder" title="esconder / mostrar">–</button>
+      <div id="hud">
+        <div id="hudBaile" style="display: none; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; width: 90%;">
+          <div style="font-size: 8px; letter-spacing: .2em; color: #8899aa; text-transform: uppercase; margin-bottom: 3px;">PATENCO_X · AFROBEATS (156.5 BPM)</div>
+          <div id="hudBailePaso" style="font-size: 16px; font-weight: bold; letter-spacing: .22em; color: #ffffff; text-shadow: 0 0 14px rgba(255,255,255,0.8); text-transform: uppercase;">THE BECKON</div>
+          <div id="hudBaileCircuito" style="font-size: 9px; letter-spacing: .15em; color: #00f0ff; margin-top: 4px; text-transform: uppercase;">CONNECTOME: T1 MOTOR NEURONS (LEFT LEG)</div>
+          <div id="hudBaileDisparos" style="font-size: 9px; letter-spacing: .12em; color: #ffffff; margin-top: 3px; font-weight: bold;">6,420 ACTIVE NEURONS</div>
         </div>
-        <div class="lectura" id="lectura"></div>
-        <div class="leyenda">
-          <div><span class="punto" style="background:#35d6c0"></span>LC4 + LPLC2 · detectan lo que se acerca</div>
-          <div id="escape"><span class="punto" style="background:#fff"></span>DNp01 · fibra gigante → esquiva</div>
-          <div><span class="punto" style="background:#dfe9f4;opacity:.5"></span>el resto · arrastrá para girar</div>
+        <div id="hudNeuro" style="display: none; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; width: 90%;">
+          <div style="font-size: 8px; letter-spacing: .2em; color: #8899aa; text-transform: uppercase; margin-bottom: 3px;">OPTOGENETIC NEURO-SEQUENCER · DIRECT CONNECTOME INJECTION</div>
+          <div id="hudNeuroTitulo" style="font-size: 16px; font-weight: bold; letter-spacing: .22em; color: #ffffff; text-shadow: 0 0 14px rgba(255,255,255,0.8); text-transform: uppercase;">AFRO-FUSION GROOVE</div>
+          <div id="hudNeuroCanales" style="font-size: 9px; letter-spacing: .15em; color: #00f0ff; margin-top: 4px; text-transform: uppercase;">READY FOR STIMULATION · PRESS [1]-[6] OR START SEQUENCER</div>
+          <div id="hudNeuroDisparos" style="font-size: 9px; letter-spacing: .12em; color: #ffffff; margin-top: 3px; font-weight: bold;">0 ACTIVE NEURONS</div>
+        </div>
+        <div id="tel"></div>
+        <div id="boss">
+          <span>specimen</span>
+          <div class="barra"><i id="bossHp"></i></div>
+        </div>
+        <div id="vida">
+          <span>subject</span>
+          <div class="barra"><i id="playerHp"></i></div>
+        </div>
+        <div id="ayuda">space pause · r restart · shift stealth · wasd move</div>
+        <div id="fin"></div>
+      </div>
+    </div>
+
+    <!-- Modal resultado Mantis -->
+    <div id="modalMantis" class="modal" style="display: none;">
+      <div class="modal-contenido">
+        <h2 id="modalTitulo">specimen captured</h2>
+        <p id="modalDesc" class="modal-desc">
+          Approach below excitation threshold of LC4 and LPLC2.
+          Giant fiber DNp01 did not fire.
+        </p>
+        <div class="modal-stats" id="modalStats"></div>
+        <div class="modal-acciones">
+          <button id="btnReintentarMantis">retry [r]</button>
+          <button id="btnCompartirMantis" class="btn-resaltado">copy result</button>
         </div>
       </div>
     </div>
-    <div id="ojo" hidden>
-      <canvas></canvas>
-      <div class="rotulos" style="position:static"><div><span>← atrás · ojo izquierdo</span><span>frente</span><span>ojo derecho · atrás →</span></div></div>
-    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -11,7 +11,15 @@ El motor está terminado y en verde. La mosca corre en `fly/` (LIF sobre las
 por la fibra gigante, y el movimiento, leyendo las motoneuronas de las seis patas
 (`fly/patas.py`). El tacto de las patas la aparta de las paredes (pasa su
 experimento y su control cruzado); DNa02 no sobrevive al LIF, así que lejos de
-las paredes el rumbo es ruido de la red. Las armas siguen sin cerebro.
+las paredes el rumbo es ruido de la red.
+
+Y **ataca**: embiste cuando la balanza de valencia de las MBON del cuerpo
+pedunculado dice acercarse (`fly/ataque.py`), con el olor del rival —la feromona
+cVA— como entrada. La dopamina entra de verdad (PAM al acertar, PPL1 al recibir
+daño) y mueve esa balanza, pero **todavía no cambia la conducta**: el control sin
+plasticidad hace lo mismo. Esa mosca corre con ruido de fondo 1,5 y no 2,0,
+porque con 2,0 la red se enciende sola y cierra el olfato; el precio es que la
+esquiva pierde precisión. Todo medido en `fly/README.md`.
 
 ## El invariante del que cuelga todo
 
